@@ -1,0 +1,145 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: scd
+      POSTGRES_PASSWORD: scd
+      POSTGRES_DB: clinica
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d
+    networks:
+      - db-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: scd
+      KC_DB_PASSWORD: scd
+      KC_HOSTNAME_STRICT: "false"
+      KC_HTTP_ENABLED: "true"
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    networks:
+      - auth-net
+      - db-net
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+
+  user-service:
+    image: medical-user-service:latest
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      KEYCLOAK_CLIENT_ID: medical-app
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    ports:
+      - "5001:5000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 10
+
+  # doctor-service:
+  #   image: medical-doctor-service:latest
+  #   environment:
+  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+  #     KEYCLOAK_URL: http://keycloak:8080
+  #     KEYCLOAK_REALM: medical-clinica
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #     - auth-net
+  #   deploy:
+  #     replicas: 2
+  #     restart_policy:
+  #       condition: on-failure
+
+  # appointment-service:
+  #   image: medical-appointment-service:latest
+  #   environment:
+  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+  #     KEYCLOAK_URL: http://keycloak:8080
+  #     KEYCLOAK_REALM: medical-clinica
+  #     REDIS_URL: redis://redis:6379
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #     - auth-net
+  #   deploy:
+  #     replicas: 3
+  #     restart_policy:
+  #       condition: on-failure
+
+  # redis:
+  #   image: redis:7-alpine
+  #   networks:
+  #     - internal-net
+  #   volumes:
+  #     - redis_data:/data
+  #   deploy:
+  #     replicas: 1
+
+  # minio:
+  #   image: minio/minio
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   command: server /data --console-address ":9001"
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   networks:
+  #     - internal-net
+  #   volumes:
+  #     - minio_data:/data
+  #   deploy:
+  #     replicas: 1
+
+  # notification-service:
+  #   image: medical-notification-service:latest
+  #   environment:
+  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #   deploy:
+  #     replicas: 2
+  #     restart_policy:
+  #       condition: on-failure
+
+networks:
+  db-net:
+    driver: overlay
+  auth-net:
+    driver: overlay
+  internal-net:
+    driver: overlay
+
+volumes:
+  db_data:
+  # redis_data:
+  # minio_data:

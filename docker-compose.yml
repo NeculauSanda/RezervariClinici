@@ -1,0 +1,178 @@
+version: "3.9"
+
+services:
+  # Baza de date PostgreSQL
+  db:
+    image: postgres:15
+    container_name: medical_db
+    environment:
+      POSTGRES_USER: ${DB_USER:-scd}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-scd}
+      POSTGRES_DB: ${DB_NAME:-clinica}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    networks:
+      - db-net
+    # testare bd daca e up si merge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-scd} -d ${DB_NAME:-clinica}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Keycloak pentru autentificare
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: keycloak
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://db:5432/keycloak
+      KC_DB_USERNAME: scd
+      KC_DB_PASSWORD: scd
+      KC_HOSTNAME_STRICT: false
+      KC_HTTP_ENABLED: true
+    # import realm clinicai la pornire
+    command: start-dev --import-realm
+    ports:
+      - "8080:8080"
+    # conditie pt keycloak sa porneasca doar dupa ce db e
+    # si el up pt ca altfel ar pica
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - auth-net
+      - db-net
+    # montam fisierul de export al realm-ului
+    volumes:
+      - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json
+
+  # User Service
+  user-service:
+    build: ./user-service
+    container_name: user_service
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      FLASK_ENV: development
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-medical-clinica}
+      KEYCLOAK_CLIENT_ID: medical-app
+    depends_on:
+      - db
+      - keycloak
+    ports:
+      - "5001:5000"
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    volumes:
+      - ./user-service:/app
+    command: python app.py
+
+  # Doctor Service
+  # doctor-service:
+  #   build: ./doctor-service
+  #   container_name: doctor_service
+  #   environment:
+  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+  #     KEYCLOAK_URL: http://keycloak:8080
+  #     KEYCLOAK_REALM: medical-clinica
+  #   depends_on:
+  #     - db
+  #     - keycloak
+  #   ports:
+  #     - "5002:5000"
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #     - auth-net
+  #   volumes:
+  #     - ./doctor-service:/app
+
+  # # Appointment Service
+  # appointment-service:
+  #   build: ./appointment-service
+  #   container_name: appointment_service
+  #   environment:
+  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+  #     KEYCLOAK_URL: http://keycloak:8080
+  #     KEYCLOAK_REALM: medical-clinica
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     - db
+  #     - keycloak
+  #     - redis
+  #   ports:
+  #     - "5003:5000"
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #     - auth-net
+  #   volumes:
+  #     - ./appointment-service:/app
+
+  # # Redis pentru lock distribuit
+  # redis:
+  #   image: redis:7-alpine
+  #   container_name: redis
+  #   ports:
+  #     - "6379:6379"
+  #   networks:
+  #     - internal-net
+  #   volumes:
+  #     - redis_data:/data
+
+  # # MinIO pentru stocarea PDF-urilor
+  # minio:
+  #   image: minio/minio
+  #   container_name: minio
+  #   environment:
+  #     MINIO_ROOT_USER: minioadmin
+  #     MINIO_ROOT_PASSWORD: minioadmin
+  #   command: server /data --console-address ":9001"
+  #   ports:
+  #     - "9000:9000"
+  #     - "9001:9001"
+  #   networks:
+  #     - internal-net
+  #   volumes:
+  #     - minio_data:/data
+
+  # # Notification Service
+  # notification-service:
+  #   build: ./notification-service
+  #   container_name: notification_service
+  #   environment:
+  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+  #     SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
+  #     SMTP_PORT: ${SMTP_PORT:-587}
+  #     SMTP_USER: ${SMTP_USER}
+  #     SMTP_PASSWORD: ${SMTP_PASSWORD}
+  #   depends_on:
+  #     - db
+  #   ports:
+  #     - "5004:5000"
+  #   networks:
+  #     - internal-net
+  #     - db-net
+  #   volumes:
+  #     - ./notification-service:/app
+
+networks:
+  db-net:
+    driver: bridge
+  auth-net:
+    driver: bridge
+  internal-net:
+    driver: bridge
+
+volumes:
+  db_data:
+  # redis_data:
+  # minio_data:
