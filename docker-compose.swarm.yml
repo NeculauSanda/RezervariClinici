@@ -63,20 +63,25 @@ services:
         delay: 10s
         max_attempts: 10
 
-  # doctor-service:
-  #   image: medical-doctor-service:latest
-  #   environment:
-  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
-  #     KEYCLOAK_URL: http://keycloak:8080
-  #     KEYCLOAK_REALM: medical-clinica
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #     - auth-net
-  #   deploy:
-  #     replicas: 2
-  #     restart_policy:
-  #       condition: on-failure
+  doctor-service:
+    image: medical-doctor-service:latest
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      KEYCLOAK_CLIENT_ID: medical-app
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    ports:
+      - "5002:5000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 10
 
   # appointment-service:
   #   image: medical-appointment-service:latest

@@ -12,6 +12,7 @@ users_bp = Blueprint('users', __name__, url_prefix='/users')
 def health():
     return jsonify({'status': 'OK'}), 200
 
+# ------------------- FUNCTII AJUTATOARE PT KEYCLOAK ----------------
 
 def get_keycloak_admin_token():
     """
@@ -37,6 +38,115 @@ def get_keycloak_admin_token():
         current_app.logger.error(f"Eroare nu s-a putut obtine tokenul de admin: {e}")
         return None
 
+def update_keycloak_user(external_id, keycloak_data):
+    """
+    Actualizez datele utilizatorului si in Keycloak
+    """
+    try:
+        admin_token = get_keycloak_admin_token()
+        if not admin_token:
+            return False
+
+        keycloak_url = os.getenv('KEYCLOAK_URL', 'http://keycloak:8080')
+        realm = os.getenv('KEYCLOAK_REALM', 'medical-clinica')
+
+        url = f"{keycloak_url}/admin/realms/{realm}/users/{external_id}"
+        headers = {'Authorization': f'Bearer {admin_token}', 'Content-Type': 'application/json'}
+
+        response = requests.put(url, json=keycloak_data, headers=headers)
+        return response.status_code in [200, 204]
+
+    except Exception as e:
+        current_app.logger.error(f"Eroare la actualizare Keycloak: {e}")
+        return False
+
+def update_keycloak_role(external_id, new_role):
+    """
+    Actualizez rolul utilizatorului si in Keycloak
+    """
+    try:
+        admin_token = get_keycloak_admin_token()
+        if not admin_token:
+            return False
+
+        keycloak_url = os.getenv('KEYCLOAK_URL', 'http://keycloak:8080')
+        realm = os.getenv('KEYCLOAK_REALM', 'medical-clinica')
+
+        # obtin rolul actual din Keycloak
+        roles_url = f"{keycloak_url}/admin/realms/{realm}/roles"
+        headers = {'Authorization': f'Bearer {admin_token}'}
+
+        role_response = requests.get(f"{roles_url}/{new_role}", headers=headers)
+        if role_response.status_code != 200:
+            return False
+
+        role_data = role_response.json()
+
+        # sterg rolul existent si pun pe cel nou
+        user_roles_url = f"{keycloak_url}/admin/realms/{realm}/users/{external_id}/role-mappings/realm"
+        requests.delete(user_roles_url, headers=headers)
+        requests.post(user_roles_url, headers=headers, json=[role_data])
+
+        return True
+    
+    except Exception as e:
+        current_app.logger.error(f"Eroare la actualizare Keycloak rol: {e}")
+        return False
+
+def assign_keycloak_role(external_id, role_name):
+    """
+    Asigneaza un rol utilizatorului in Keycloak
+    """
+    try:
+        admin_token = get_keycloak_admin_token()
+        if not admin_token:
+            return False
+
+        keycloak_url = os.getenv('KEYCLOAK_URL', 'http://keycloak:8080')
+        realm = os.getenv('KEYCLOAK_REALM', 'medical-clinica')
+
+        # otin rolul din Keycloak
+        roles_url = f"{keycloak_url}/admin/realms/{realm}/roles"
+        headers = {'Authorization': f'Bearer {admin_token}'}
+
+        role_response = requests.get(f"{roles_url}/{role_name}", headers=headers)
+        if role_response.status_code != 200:
+            return False
+
+        role_data = role_response.json()
+
+        # aigneaza rolul userului
+        user_roles_url = f"{keycloak_url}/admin/realms/{realm}/users/{external_id}/role-mappings/realm"
+        response = requests.post(user_roles_url, headers=headers, json=[role_data])
+
+        return response.status_code in [200, 204]
+
+    except Exception as e:
+        current_app.logger.error(f"Eroare la asignare rol Keycloak: {e}")
+        return False
+
+def delete_keycloak_user(external_id):
+    """
+    Sterg utilizatorul si din Keycloak
+    """
+    try:
+        admin_token = get_keycloak_admin_token()
+        if not admin_token:
+            return False
+
+        keycloak_url = os.getenv('KEYCLOAK_URL', 'http://keycloak:8080')
+        realm = os.getenv('KEYCLOAK_REALM', 'medical-clinica')
+
+        url = f"{keycloak_url}/admin/realms/{realm}/users/{external_id}"
+        headers = {'Authorization': f'Bearer {admin_token}'}
+
+        response = requests.delete(url, headers=headers)
+        return response.status_code in [200, 204]
+
+    except Exception as e:
+        current_app.logger.error(f"Eroare la stergere Keycloak: {e}")
+        return False
+
 #  ------------------- AUTENTIFICARE NOU UTILIZATOR -------------------
 
 @users_bp.route('/register', methods=['POST'])
@@ -60,7 +170,7 @@ def register_user():
 
     # doar pacientii se pot inregistra singuri
     if role_str != 'PATIENT':
-        return jsonify({'Eroare': 'Doar pacientii se pot auto-înregistra. Doctorii trebuie creati de admin'}), 403
+        return jsonify({'Eroare': 'Doar pacientii se pot auto-iregistra. Doctorii trebuie creati de admin'}), 403
 
     # verific daca utilizatorul se afla deja in BD dupa email
     if User.query.filter_by(email=email).first():
@@ -128,6 +238,9 @@ def register_user():
         else:
             return jsonify({'Eroare': 'User creat dar nu s-a putut obtine ID-ul'}), 500
 
+    # asignare rol utilizatorului in Keycloak
+    assign_keycloak_role(keycloak_id, role_str)
+
     # salvam userul in BD local
     try:
         # default PACIENT
@@ -169,6 +282,7 @@ def register_user():
 def update_current_user():
     """
     Actualizeaza profilul userului curent (nu poate accesa daca nu e autentificat)
+    + actualizare in Keycloak
     """
 
     external_id = request.user.get('external_id')
@@ -179,15 +293,25 @@ def update_current_user():
     if not user:
         return jsonify({'Eroare': 'Userul nu a fost gasit'}), 404
 
-    # actualizam campurile permise
+    # actualizam campurile permise si datele pentru Keycloak
+    keycloak_data = {}
+
     if 'full_name' in data:
         user.full_name = data['full_name']
+        names = data['full_name'].split(' ', 1)
+        keycloak_data['firstName'] = names[0]
+        keycloak_data['lastName'] = names[1] if len(names) > 1 else ""
+
     if 'phone' in data:
         user.phone = data['phone']
 
     user.updated_at = datetime.utcnow()
 
     try:
+        # atualizez si in keycloak
+        if keycloak_data:
+            update_keycloak_user(external_id, keycloak_data)
+
         # salvam modificarile in BD
         db.session.commit()
         return jsonify(user.to_dict()), 200
@@ -219,8 +343,7 @@ def get_current_user():
 def sync_keycloak():
     """
     Sincronizeaza BD-ului local cu datele din Keycloak ale userului autentificat
-    1. Daca userul exista in BD local, ii actualizez datele (email, nume, tel) -> trebuie si in Keycloak
-    2. Daca userul nu exista in BD local, dar se afla doar in Keycloak
+    Daca userul nu exista in BD local, dar se afla doar in Keycloak
     """
 
     token = get_token_from_header()
@@ -312,8 +435,6 @@ def get_all_users():
         'pages': pagination.pages
     }), 200
 
-
-# GET /<user_id> - Get user by ID (ADMIN ONLY) PENTRU SECURITATE ALT USER NU ARE CUM SA VADA INFO ALTUI USER
 @users_bp.route('/<int:user_id>', methods=['GET'])
 @require_role('ADMIN')
 def get_user(user_id):
@@ -333,22 +454,30 @@ def get_user(user_id):
 def update_user(user_id):
     """
     Actualizari facute userilor doar de catre admin (cum ar fi rolul, celelalte campuri se pot
-    schimba si de catre admin, dar si de catre user)
+    schimba si de catre admin, dar si de catre user) + actualizare in Keycloak
     """
     user = User.query.get(user_id)
 
     if not user:
         return jsonify({'Eroare': 'Utilizatorul nu a fost gasit'}), 404
 
+    # actualizare atat in BD cat si in Keycloak
     data = request.get_json()
+    keycloak_data = {}
 
     if 'email' in data:
         user.email = data['email']
+        keycloak_data['email'] = data['email']
+
     if 'full_name' in data:
         user.full_name = data['full_name']
+        names = data['full_name'].split(' ', 1)
+        keycloak_data['firstName'] = names[0]
+        keycloak_data['lastName'] = names[1] if len(names) > 1 else ""
+
     if 'phone' in data:
         user.phone = data['phone']
-    
+
     # functie separata pt rol
     # if 'role' in data:
     #     try:
@@ -366,6 +495,10 @@ def update_user(user_id):
 
     # adaugare in BD
     try:
+        # actualzez si in keycloak
+        if keycloak_data:
+            update_keycloak_user(user.external_id, keycloak_data)
+
         db.session.commit()
         return jsonify(user.to_dict()), 200
 
@@ -379,7 +512,7 @@ def update_user(user_id):
 @require_role('ADMIN')
 def update_user_role(user_id):
     """
-    Actualizeaza doar rolul unui utilizator (doar ADMIN)
+    Actualizeaza doar rolul unui utilizator (doar ADMIN) + actualizare in Keycloak
     """
     data = request.get_json()
 
@@ -395,6 +528,10 @@ def update_user_role(user_id):
         user.role = new_role
         # actualizez data ultimei modificari a profilului + bd
         user.updated_at = datetime.utcnow()
+
+        # actualizez si in Keycloak
+        update_keycloak_role(user.external_id, data['role'].upper())
+
         db.session.commit()
         return jsonify(user.to_dict()), 200
 
@@ -416,7 +553,19 @@ def delete_user(user_id):
     if not user:
         return jsonify({'Eroare': 'Utilizatorul nu a fost gasit'}), 404
 
-    db.session.delete(user)
-    db.session.commit()
+    try:
+        external_id = user.external_id
 
-    return jsonify({'message': 'Utilizatorul a fost sters cu succes'}), 200
+        # sterg in BD
+        db.session.delete(user)
+        db.session.commit()
+
+        # sterg din Keycloak
+        delete_keycloak_user(external_id)
+
+        return jsonify({'message': 'Utilizatorul a fost sters cu succes'}), 200
+
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error(f"Eroare la stergerea userului: {e}")
+        return jsonify({'Eroare': 'Eroare la stergerea userului'}), 500

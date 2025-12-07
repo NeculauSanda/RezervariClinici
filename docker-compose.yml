@@ -76,24 +76,26 @@ services:
     command: python app.py
 
   # Doctor Service
-  # doctor-service:
-  #   build: ./doctor-service
-  #   container_name: doctor_service
-  #   environment:
-  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
-  #     KEYCLOAK_URL: http://keycloak:8080
-  #     KEYCLOAK_REALM: medical-clinica
-  #   depends_on:
-  #     - db
-  #     - keycloak
-  #   ports:
-  #     - "5002:5000"
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #     - auth-net
-  #   volumes:
-  #     - ./doctor-service:/app
+  doctor-service:
+    build: ./doctor-service
+    container_name: doctor_service
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      FLASK_ENV: development  
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      KEYCLOAK_CLIENT_ID: medical-app  
+    depends_on:
+      - db
+      - keycloak
+    ports:
+      - "5002:5000"
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    volumes:
+      - ./doctor-service:/app
 
   # # Appointment Service
   # appointment-service:

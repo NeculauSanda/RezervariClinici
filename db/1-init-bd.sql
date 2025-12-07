@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_appointment_events_is_processed ON appointment_ev
 
 -- date initiale cu care populez bd la specializarile doctorilor
 INSERT INTO specializations (name, description) VALUES
-('Cardiologie', 'Specialitatea care se ocupă cu diagnosticul și tratamentul bolilor cardiovasculare'),
+('Cardiologie', 'Specialitatea care se ocupa cu diagnosticul si tratamentul bolilor cardiovasculare'),
 ('Dermatologie', 'Specialitatea care trateaza afectiunile pielii'),
 ('Pediatrie', 'Specialitatea care se ocupa cu sanatatea copiilor'),
 ('Neurologie', 'Specialitatea care trateaza afectiunile sistemului nervos'),
@@ -105,9 +105,10 @@ ON CONFLICT DO NOTHING;
 
 -- date initiale pt cabinete
 INSERT INTO cabinets (name, floor, location) VALUES
-('Cabinet 101', 1, 'Etaj 1, Aripa Stânga'),
-('Cabinet 102', 1, 'Etaj 1, Aripa Stânga'),
+('Cabinet 101', 1, 'Etaj 1, Aripa Stanga'),
+('Cabinet 102', 1, 'Etaj 1, Aripa Stanga'),
+('Cabinet 105', 1, 'Etaj 1, Aripa Dreapta'),
 ('Cabinet 201', 2, 'Etaj 2, Aripa Dreapta'),
 ('Cabinet 202', 2, 'Etaj 2, Aripa Dreapta'),
-('Cabinet 301', 3, 'Etaj 3, Central')
+('Cabinet 301', 3, 'Etaj 3, Primul din fata scarilor')
 ON CONFLICT DO NOTHING;
