@@ -3,7 +3,7 @@ from datetime import timedelta
 
 class Config:
 
-    # BD - Conectare la aceeasi BD 'clinica'
+    # Conectare la aceeasi BD
     SQLALCHEMY_DATABASE_URI = os.getenv(
         'DATABASE_URL',
         'postgresql://scd:scd@db:5432/clinica'
@@ -19,5 +19,4 @@ class Config:
     # JWT algoritmul de criptare
     JWT_ALGORITHM = 'RS256'
 
-    JSON_SORT_KEYS = False
     PROPAGATE_EXCEPTIONS = True

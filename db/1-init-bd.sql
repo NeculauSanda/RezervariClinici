@@ -88,26 +88,24 @@ CREATE TABLE IF NOT EXISTS notifications (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- indecsi pt a gasi mai repede informatia cu datele pe care le folosesc cel mai des
+-- indecsi pt a gasi mai repede informatia pe coloanele pe care o sa le folosesc cel mai des
 CREATE INDEX IF NOT EXISTS idx_users_external_id ON users(external_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
-CREATE INDEX IF NOT EXISTS idx_appointments_start_time ON appointments(start_time);
-CREATE INDEX IF NOT EXISTS idx_appointment_events_is_processed ON appointment_events(is_processed);
 
--- date initiale cu care populez bd la specializarile doctorilor
+-- date initiale pt specializarile doctorilor
 INSERT INTO specializations (name, description) VALUES
-('Cardiologie', 'Specialitatea care se ocupa cu diagnosticul si tratamentul bolilor cardiovasculare'),
-('Dermatologie', 'Specialitatea care trateaza afectiunile pielii'),
-('Pediatrie', 'Specialitatea care se ocupa cu sanatatea copiilor'),
-('Neurologie', 'Specialitatea care trateaza afectiunile sistemului nervos'),
-('Ortopedie', 'Specialitatea care trateaza afectiunile sistemului locomotor')
+('Cardiologie', 'Specializarea care se ocupa cu diagnosticarea, tratamentul bolilor cardiovasculare'),
+('Dermatologie', 'Specializarea care trateaza afectiuni ale pielii'),
+('Pediatrie', 'Specializarea care se ocupa de sanatatea copiilor'),
+('Neurologie', 'Specializarea care trateaza afectiuni ale creierului si a sistemului nervos'),
+('Ortopedie', 'Specializarea care se ocupa cu tratarea afectiunilor sitemului muscular, locomotor')
 ON CONFLICT DO NOTHING;
 
 -- date initiale pt cabinete
 INSERT INTO cabinets (name, floor, location) VALUES
 ('Cabinet 101', 1, 'Etaj 1, Aripa Stanga'),
 ('Cabinet 102', 1, 'Etaj 1, Aripa Stanga'),
-('Cabinet 105', 1, 'Etaj 1, Aripa Dreapta'),
+('Cabinet 445', 4, 'Etaj 4, Aripa Dreapta'),
 ('Cabinet 201', 2, 'Etaj 2, Aripa Dreapta'),
 ('Cabinet 202', 2, 'Etaj 2, Aripa Dreapta'),
 ('Cabinet 301', 3, 'Etaj 3, Primul din fata scarilor')

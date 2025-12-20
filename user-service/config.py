@@ -20,7 +20,6 @@ class Config:
 
     # JWT - algoritmul de criptare pt token-urile userilor + durata de viata a lui
     JWT_ALGORITHM = 'RS256'
-    JWT_EXPIRATION = timedelta(minutes=30)
+    JWT_EXPIRATION = timedelta(minutes=60)
 
-    JSON_SORT_KEYS = False # nu sortez cheile (json) in raspusurile primite de la server
     PROPAGATE_EXCEPTIONS = True # pentru debug ca erorile sa se vada si sa fie propagate

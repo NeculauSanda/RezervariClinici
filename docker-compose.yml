@@ -52,6 +52,15 @@ services:
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm.json
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    networks:
+      - internal-net
+
   # User Service
   user-service:
     build: ./user-service
@@ -62,6 +71,8 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: ${KEYCLOAK_REALM:-medical-clinica}
       KEYCLOAK_CLIENT_ID: medical-app
+      KEYCLOAK_BACKEND_CLIENT_ID: ${KEYCLOAK_BACKEND_CLIENT_ID:-medical-backend}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-secret-backend}
     depends_on:
       - db
       - keycloak
@@ -84,7 +95,9 @@ services:
       FLASK_ENV: development  
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: medical-clinica
-      KEYCLOAK_CLIENT_ID: medical-app  
+      KEYCLOAK_CLIENT_ID: medical-app 
+      KEYCLOAK_BACKEND_CLIENT_ID: ${KEYCLOAK_BACKEND_CLIENT_ID:-medical-backend}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-secret-backend}
     depends_on:
       - db
       - keycloak
@@ -97,74 +110,43 @@ services:
     volumes:
       - ./doctor-service:/app
 
-  # # Appointment Service
-  # appointment-service:
-  #   build: ./appointment-service
-  #   container_name: appointment_service
-  #   environment:
-  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
-  #     KEYCLOAK_URL: http://keycloak:8080
-  #     KEYCLOAK_REALM: medical-clinica
-  #     REDIS_URL: redis://redis:6379
-  #   depends_on:
-  #     - db
-  #     - keycloak
-  #     - redis
-  #   ports:
-  #     - "5003:5000"
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #     - auth-net
-  #   volumes:
-  #     - ./appointment-service:/app
+  appointment-service:
+    build: ./appointment-service
+    container_name: appointment_service
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - db
+      - keycloak
+      - rabbitmq
+    ports:
+      - "5003:5000"
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    volumes:
+      - ./appointment-service:/app
 
-  # # Redis pentru lock distribuit
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: redis
-  #   ports:
-  #     - "6379:6379"
-  #   networks:
-  #     - internal-net
-  #   volumes:
-  #     - redis_data:/data
-
-  # # MinIO pentru stocarea PDF-urilor
-  # minio:
-  #   image: minio/minio
-  #   container_name: minio
-  #   environment:
-  #     MINIO_ROOT_USER: minioadmin
-  #     MINIO_ROOT_PASSWORD: minioadmin
-  #   command: server /data --console-address ":9001"
-  #   ports:
-  #     - "9000:9000"
-  #     - "9001:9001"
-  #   networks:
-  #     - internal-net
-  #   volumes:
-  #     - minio_data:/data
-
-  # # Notification Service
-  # notification-service:
-  #   build: ./notification-service
-  #   container_name: notification_service
-  #   environment:
-  #     DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
-  #     SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-  #     SMTP_PORT: ${SMTP_PORT:-587}
-  #     SMTP_USER: ${SMTP_USER}
-  #     SMTP_PASSWORD: ${SMTP_PASSWORD}
-  #   depends_on:
-  #     - db
-  #   ports:
-  #     - "5004:5000"
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #   volumes:
-  #     - ./notification-service:/app
+  appointment-worker:
+    build: ./appointment-service
+    container_name: appointment_worker
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      RABBITMQ_HOST: rabbitmq
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - internal-net
+      - db-net
+    volumes:
+      - ./appointment-service:/app
+    command: python worker.py
 
 networks:
   db-net:
@@ -176,5 +158,3 @@ networks:
 
 volumes:
   db_data:
-  # redis_data:
-  # minio_data:

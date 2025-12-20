@@ -5,13 +5,35 @@ from enum import Enum
 # initializare ORM SQLAlchemy
 db = SQLAlchemy()
 
-# roluri
 class UserRole(str, Enum):
     PATIENT = "PATIENT"
     DOCTOR = "DOCTOR"
     ADMIN = "ADMIN"
 
-# ------------ modelele ------------
+class AppointmentStatus(str, Enum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
+    COMPLETED = "COMPLETED"
+    REJECTED = "REJECTED"
+
+class EventType(str, Enum):
+    CREATED = "CREATED"
+    UPDATED = "UPDATED"
+    CANCELLED = "CANCELLED"
+    REMINDER_DUE = "REMINDER_DUE"
+    PDF_GENERATED = "PDF_GENERATED"
+
+class NotificationType(str, Enum):
+    EMAIL = "EMAIL"
+    SMS = "SMS"
+
+class NotificationStatus(str, Enum):
+    SENT = "SENT"
+    FAILED = "FAILED"
+    PENDING = "PENDING"
+
+# ------------ modelele -----------
 
 class User(db.Model):
     __tablename__ = 'users'
@@ -25,9 +47,9 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
-    # chei + relatii
+    # relatii
     # userul poate avea mai multe programari + notificari
-    appointments_as_patient = db.relationship('Appointment', foreign_keys='Appointment.patient_id', backref='patient',
+    appointments_patient = db.relationship('Appointment', foreign_keys='Appointment.patient_id', backref='patient',
                                              lazy='dynamic')
     notifications = db.relationship('Notification', backref='user', lazy='dynamic')
     
@@ -97,8 +119,7 @@ class Doctor(db.Model):
     bio = db.Column(db.Text)
     years_experience = db.Column(db.Integer)
 
-    # un user poate avea un doctor (se poate accesa din user profilul doctorului doar daca e doctorul)
-    #  + mai multe programari pot fi asociate unui doctor (daca sterg doctorul, ii sterg si programarile prin cascade)
+    # mai multe programari pot fi asociate unui doctor (daca sterg doctorul, ii sterg si programarile prin cascade)
     user = db.relationship('User', backref=db.backref('doctor_profile', uselist=False))
     schedules = db.relationship('Schedule', backref='doctor', lazy='dynamic', cascade='all, delete-orphan')
     appointments = db.relationship('Appointment', backref='doctor', lazy='dynamic')
@@ -140,12 +161,6 @@ class Schedule(db.Model):
         }
 
 
-class AppointmentStatus(str, Enum):
-    PENDING = "PENDING"
-    CONFIRMED = "CONFIRMED"
-    CANCELLED = "CANCELLED"
-    COMPLETED = "COMPLETED"
-
 class Appointment(db.Model):
     __tablename__ = 'appointments'
 
@@ -179,14 +194,6 @@ class Appointment(db.Model):
         }
 
 
-class EventType(str, Enum):
-    CREATED = "CREATED"
-    UPDATED = "UPDATED"
-    CANCELLED = "CANCELLED"
-    REMINDER_DUE = "REMINDER_DUE"
-    PDF_GENERATED = "PDF_GENERATED"
-
-
 class AppointmentEvent(db.Model):
     __tablename__ = 'appointment_events'
 
@@ -206,17 +213,6 @@ class AppointmentEvent(db.Model):
             'is_processed': self.is_processed,
             'created_at': self.created_at.isoformat()
         }
-
-
-class NotificationType(str, Enum):
-    EMAIL = "EMAIL"
-    SMS = "SMS"
-
-
-class NotificationStatus(str, Enum):
-    SENT = "SENT"
-    FAILED = "FAILED"
-    PENDING = "PENDING"
 
 
 class Notification(db.Model):

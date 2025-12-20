@@ -12,24 +12,31 @@ aux_bp = Blueprint('auxiliaries', __name__)
 # ---------------- FUNCTII AJUTATOARE PENTRU INTERACTIUNEA CU KEYCLOAK  -----------------
 def get_keycloak_admin_token():
     """
-    Obtin tokenul de la ADMIN ca sa pot sa pot sa actualizez rolurile userilor in Keycloak
+    Obtin tokenul de la medical-backend care are configurari "asemanatoare" cu cele de ADMIN 
+    (realm-admin, manage-users, view-users) pt a actualiza rolurile userilor in Keycloak 
+    (este diferit de adminul original)
     """
     try:
         keycloak_url = os.getenv('KEYCLOAK_URL', 'http://keycloak:8080')
-        token_url = f"{keycloak_url}/realms/master/protocol/openid-connect/token"
-        
-        response = requests.post(token_url, data={
-            'username': 'admin',
-            'password': 'admin',
-            'grant_type': 'password',
-            'client_id': 'admin-cli'
+        realm = os.getenv('KEYCLOAK_REALM', 'medical-clinica')
+        token_url = f"{keycloak_url}/realms/{realm}/protocol/openid-connect/token"
+
+        client_id = os.getenv('KEYCLOAK_BACKEND_CLIENT_ID', 'medical-backend')
+        client_secret = os.getenv('KEYCLOAK_BACKEND_CLIENT_SECRET', 'secret-backend')
+
+        raspuns = requests.post(token_url, data={
+            'client_id': client_id,
+            'client_secret': client_secret,
+            'grant_type': 'client_credentials'
         })
         
-        if response.status_code == 200:
-            return response.json().get('access_token')
+        if raspuns.status_code == 200:
+            return raspuns.json().get('access_token')
+
         return None
+
     except Exception as e:
-        print(f"Eroare la obtinere admin token: {e}")
+        print(f"Eroare nu s-a putut obtine tokenul de la medical-backend(serv de gestionare): {e}")
         return None
 
 def update_keycloak_role(user_id, external_id, new_role):
@@ -39,6 +46,7 @@ def update_keycloak_role(user_id, external_id, new_role):
     try:
         # iau tokenul de admin
         admin_token = get_keycloak_admin_token()
+
         if not admin_token:
             return False
 
@@ -50,15 +58,15 @@ def update_keycloak_role(user_id, external_id, new_role):
 
         headers = {'Authorization': f'Bearer {admin_token}'}
 
-        # obtin rolul
-        role_response = requests.get(f"{roles_url}/{new_role}", headers=headers)
+        # obtin rolul nou
+        rol_new = requests.get(f"{roles_url}/{new_role}", headers=headers)
 
-        if role_response.status_code != 200:
+        if rol_new.status_code != 200:
             return False
 
-        role_data = role_response.json()
+        role_data = rol_new.json()
 
-        # url pt rolurile userului
+        # url pt rolul vechi
         user_roles_url = f"{keycloak_url}/admin/realms/{realm}/users/{external_id}/role-mappings/realm"
 
         # sterg rolul existent
@@ -89,8 +97,8 @@ def create_specialization():
     """
     Se creeaza o noua specializare doar de catre ADMIN
     """
-
     data = request.get_json()
+
     if not data or 'name' not in data:
         return jsonify({'Eroare': 'Numele specializarii este obligatoriu'}), 400
 
@@ -116,6 +124,7 @@ def update_specialization(id):
     Actualizare specializare existenta - doar ADMIN
     """
     specializare = Specialization.query.get(id)
+
     if not specializare:
         return jsonify({'Eroare': 'Specializarea nu exista'}), 404
 
@@ -137,17 +146,16 @@ def delete_specialization(id):
     Daca avem doctori la aceasta specializare, nu se poate sterge
     """
     specializare = Specialization.query.get(id)
+
     if not specializare:
         return jsonify({'Eroare': 'Specializarea nu exista'}), 404
 
     try:
-        # Verific daca sunt doctori cu aceasta specializare
+        # Verific daca sunt doctori cu aceasta specializare =>am conflict si trebuie stersi nu am nevoie sa fac asta si 
+        # e mult de munca sa i sterg
         doctori = Doctor.query.filter_by(specialization_id=id).all()
         if doctori:
-            return jsonify({
-                'Eroare': f'Nu poti sterge aceasta specializare. Sunt {len(doctori)} doctori cu aceasta specializare',
-                'doctori_count': len(doctori)
-            }), 409  # Conflict
+            return jsonify({'Eroare': f'Nu poti sterge aceasta specializare. Sunt {len(doctori)} doctori cu aceasta specializare'}), 409
 
         db.session.delete(specializare)
         db.session.commit()
@@ -175,9 +183,9 @@ def create_cabinet():
     Se creeaza un nou cabinet in clinica doar de catre ADMIN
     """
     data = request.get_json()
+
     if not data or 'name' not in data:
-        return jsonify({'Eroare': 'Numele cabinetului este obligatoriu', 
-                        'exemplu': '''{"name": "Cabinet 6", "floor(opt)": 2, "location(opt)": "Etaj 2, Usa 206"}'''}), 400
+        return jsonify({'Eroare': 'Numele cabinetului este obligatoriu'}), 400
 
     # verific DUPLICATE in BD
     exista = Cabinet.query.filter_by(name=data['name']).first()
@@ -205,6 +213,7 @@ def update_cabinet(id):
     Actualizare cabinet existent - doar ADMIN
     """
     cabinet = Cabinet.query.get(id)
+
     if not cabinet:
         return jsonify({'Eroare': 'Cabinetul nu exista'}), 404
 
@@ -231,13 +240,10 @@ def delete_cabinet(id):
         return jsonify({'Eroare': 'Cabinetul nu exista'}), 404
 
     try:
-        # Verific daca sunt doctori in acest cabinet
+        # Verific daca sunt doctori in acest cabinet -=> la fel ca la specializare (nu ma axez pe asta)
         doctori = Doctor.query.filter_by(cabinet_id=id).all()
         if doctori:
-            return jsonify({
-                'Eroare': f'Nu poti sterge acest cabinet. Sunt {len(doctori)} doctori in acest cabinet',
-                'doctori_count': len(doctori)
-            }), 409  # Conflict
+            return jsonify({'Eroare': f'Nu poti sterge acest cabinet. Sunt {len(doctori)} doctori in acest cabinet'}), 409
 
         db.session.delete(cabinet)
         db.session.commit()
@@ -260,20 +266,17 @@ def get_all_doctors():
     cab_id = request.args.get('cabinet_id')
 
     filter_doc = Doctor.query
+
     if spec_id:
         filter_doc = filter_doc.filter_by(specialization_id=spec_id)
     if cab_id:
         filter_doc = filter_doc.filter_by(cabinet_id=cab_id)
 
-    doctors = filter_doc.all()
+    doctorii = filter_doc.all()
 
     # adaug doar numele doctorului in output
     results = []
-    for doc in doctors:
-        # d_dict = doc.to_dict()
-        # if doc.user:
-        #     d_dict['full_name'] = doc.user.full_name
-        # results.append(d_dict)
+    for doc in doctorii:
         result = {
             'id': doc.id,
             'user_id': doc.user_id,
@@ -296,10 +299,11 @@ def get_doctor(id):
     Returneaza detaliile unui doctor dupa id
     """
     doc = Doctor.query.get(id)
+
     if not doc:
         return jsonify({'Eroare': 'Doctorul nu exista'}), 404
 
-    resp = {
+    rasp = {
         'id': doc.id,
         'user_id': doc.user_id,
         'full_name': doc.user.full_name if doc.user else None,
@@ -311,7 +315,7 @@ def get_doctor(id):
         'bio': doc.bio,
         'years_experience': doc.years_experience
     }
-    return jsonify(resp), 200
+    return jsonify(rasp), 200
 
 @doctors_bp.route('', methods=['POST'])
 @require_role('ADMIN')
@@ -323,16 +327,17 @@ def create_doctor():
     """
 
     data = request.get_json()
-    required = ['user_id', 'specialization_id']
-    if not all(k in data for k in required):
-        return jsonify({'Eroare': 'Lipsesc date necesare (user_id, specialization_id, cabinet_id)'}), 400
+    obligatoriu = ['user_id', 'specialization_id', 'cabinet_id']
+    for k in obligatoriu:
+        if k not in data:
+            return jsonify({'Eroare': 'Lipsesc date necesare (user_id, specialization_id, cabinet_id)'}), 400
 
     #verific daca exista userul
     user = User.query.get(data['user_id'])
     if not user:
         return jsonify({'Eroare': 'Userul nu exista'}), 404
 
-    # verific daca e deja doctor
+    # verific daca are deja profil dedoctor
     if Doctor.query.filter_by(user_id=user.id).first():
         return jsonify({'Eroare': 'Acest user este deja doctor'}), 409
 
@@ -380,7 +385,7 @@ def update_doctor(id):
         doc.bio = data['bio']
     if 'years_experience' in data:
         doc.years_experience = data['years_experience']
-  
+
     db.session.commit()
     return jsonify(doc.to_dict()), 200
 
@@ -396,10 +401,10 @@ def delete_doctor(id):
         return jsonify({'Eroare': 'Doctorul nu exista'}), 404
 
     try:
-        # otin userul asociat doctorului
+        # obtin userul asociat doctorului
         user = doc.user
 
-        # Retrogradez userul la PATIENT
+        # schimb rolul la PATIENT automat
         if user:
             user.role = UserRole.PATIENT
             # actualizez si in Keycloak rolul la PATIENT

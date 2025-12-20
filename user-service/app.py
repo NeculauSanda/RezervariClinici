@@ -12,6 +12,7 @@ def create_app(config_class=Config):
     app = Flask(__name__)
     # adaug setarile din config
     app.config.from_object(config_class)
+    app.json.sort_keys = False # nu sortez cheile (json) in raspusurile primite de la server
 
     # initialez BD-ul, leg SQLAlchemy la Flask
     db.init_app(app)
@@ -29,7 +30,7 @@ def create_app(config_class=Config):
                 # daca s a facut conexiunea creez tabelele
                 db.create_all()
                 print("Conexiunea la baza de date realizata cu succes!")
-                break # iesim din bucla
+                break
 
             except OperationalError as e:
                 if attempt == max_retries - 1:
@@ -42,4 +43,4 @@ def create_app(config_class=Config):
 
 if __name__ == '__main__':
     app = create_app()
-    app.run(debug=True, host='0.0.0.0', port=5000) # pornesc seviciul user pe portul 5000
+    app.run(debug=True, host='0.0.0.0', port=5000)

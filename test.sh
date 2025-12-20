@@ -8,14 +8,14 @@ CLIENT_ID="medical-app"
 # Porturi Servicii
 USER_SERVICE_URL="http://localhost:5001"
 DOCTOR_SERVICE_URL="http://localhost:5002" 
-# APPOINTMENT_SERVICE_URL="http://localhost:5003"
+APPOINTMENT_SERVICE_URL="http://localhost:5003"
 
 # Culori pentru output
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
 # 1 -> verificam argumentele
 ROLE=$1
@@ -24,44 +24,42 @@ ENDPOINT=$3
 DATA=$4
 
 if [ -z "$ROLE" ] || [ -z "$METHOD" ] || [ -z "$ENDPOINT" ]; then
-    echo -e "${YELLOW}=== DOCTOR-CLINIC TEST SCRIPT ===${NC}"
-    echo ""
     echo -e "Utilizare: ${GREEN}./test.sh <ROL> <METODA> <ENDPOINT> [JSON_DATA]${NC}"
-    echo ""
-    echo -e "${BLUE}ROLURI DISPONIBILE:${NC}"
-    echo "  - admin     (Admin clinica)"
-    echo "  - doctor    (Doctor)"
-    echo "  - patient   (Pacient)"
-    echo ""
-    echo -e "${BLUE}USER-SERVICE ENDPOINTS:${NC}"
-    echo "  GET    /users/health"
-    echo "  POST   /users/register              (fara auth)"
-    echo "  GET    /users/me"
-    echo "  PUT    /users/me"
-    echo "  GET    /users/                      (ADMIN ONLY)"
-    echo "  GET    /users/<id>                  (ADMIN ONLY)"
-    echo "  PUT    /users/<id>                  (ADMIN ONLY)"
-    echo "  DELETE /users/<id>                  (ADMIN ONLY)"
-    echo ""
-    echo -e "${BLUE}DOCTOR-SERVICE ENDPOINTS:${NC}"
-    echo "  GET    /specializations"
-    echo "  GET    /cabinets"
-    echo "  GET    /doctors"
-    echo "  POST   /doctors                     (ADMIN ONLY)"
-    echo "  GET    /doctors/<id>"
-    echo "  PUT    /doctors/<id>                (ADMIN ONLY)"
-    echo "  DELETE /doctors/<id>                (ADMIN ONLY)"
-    echo "  GET    /doctors/<id>/schedule"
-    echo "  POST   /doctors/<id>/schedule       (ADMIN/DOCTOR)"
-    echo "  DELETE /doctors/<id>/schedule/<id>  (ADMIN/DOCTOR)"
-    echo "  GET    /doctors/<id>/available-slots?date=YYYY-MM-DD"
-    echo ""
-    echo -e "${BLUE}EXEMPLE:${NC}"
-    echo "  ./test.sh admin GET /users"
-    echo "  ./test.sh doctor GET /doctors"
-    echo "  ./test.sh patient GET /doctors/1/available-slots?date=2025-12-10"
-    echo "  ./test.sh admin POST /doctors '{\"user_id\": 2, \"specialization_id\": 1, \"cabinet_id\": 1}'"
-    echo ""
+    # echo ""
+    # echo -e "${BLUE}ROLURI DISPONIBILE:${NC}"
+    # echo "  - admin     (Admin clinica)"
+    # echo "  - doctor    (Doctor)"
+    # echo "  - patient   (Pacient)"
+    # echo ""
+    # echo -e "${BLUE}USER-SERVICE ENDPOINTS:${NC}"
+    # echo "  GET    /users/health"
+    # echo "  POST   /users/register              (fara auth)"
+    # echo "  GET    /users/me"
+    # echo "  PUT    /users/me"
+    # echo "  GET    /users/                      (ADMIN ONLY)"
+    # echo "  GET    /users/<id>                  (ADMIN ONLY)"
+    # echo "  PUT    /users/<id>                  (ADMIN ONLY)"
+    # echo "  DELETE /users/<id>                  (ADMIN ONLY)"
+    # echo ""
+    # echo -e "${BLUE}DOCTOR-SERVICE ENDPOINTS:${NC}"
+    # echo "  GET    /specializations"
+    # echo "  GET    /cabinets"
+    # echo "  GET    /doctors"
+    # echo "  POST   /doctors                     (ADMIN ONLY)"
+    # echo "  GET    /doctors/<id>"
+    # echo "  PUT    /doctors/<id>                (ADMIN ONLY)"
+    # echo "  DELETE /doctors/<id>                (ADMIN ONLY)"
+    # echo "  GET    /doctors/<id>/schedule"
+    # echo "  POST   /doctors/<id>/schedule       (ADMIN/DOCTOR)"
+    # echo "  DELETE /doctors/<id>/schedule/<id>  (ADMIN/DOCTOR)"
+    # echo "  GET    /doctors/<id>/available-slots?date=YYYY-MM-DD"
+    # echo ""
+    # echo -e "${BLUE}EXEMPLE:${NC}"
+    # echo "  ./test.sh admin GET /users"
+    # echo "  ./test.sh doctor GET /doctors"
+    # echo "  ./test.sh patient GET /doctors/1/available-slots?date=2025-12-10"
+    # echo "  ./test.sh admin POST /doctors '{\"user_id\": 2, \"specialization_id\": 1, \"cabinet_id\": 1}'"
+    # echo ""
     exit 1
 fi
 
@@ -91,7 +89,6 @@ case $ROLE in
     ;;
   nou)
     USERNAME="pacient_nou@test.com"  # Keycloak foloseste username=email
-    USERNAME="pacient_nou@test.com"
     PASSWORD="parola_noua_123"
     ;;
   *)
@@ -102,7 +99,7 @@ esac
 
 echo -e "Authentication as ${GREEN}$USERNAME${NC}..."
 
-# 3 --> luam token-ul de la Keycloak (Ascuns de utilizator)
+# 3 --> luam token-ul de la Keycloak (Ascuns de utilizator) - aici e grant user doar pe partea de frontend (simuleaza logarea)
 TOKEN_RESPONSE=$(curl -s -X POST "$KEYCLOAK_URL/realms/$REALM/protocol/openid-connect/token" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   -d "username=$USERNAME" \
@@ -120,17 +117,19 @@ if [ -z "$TOKEN" ]; then
 fi
 
 # 4 --> Alegem URL-ul serviciului (Momentan testam User Service pe 5001 si DOCTOR pe 5002)
-# Daca endpoint-ul începe cu /users, merge la 5001.
-# TARGET_URL="$USER_SERVICE_URL$ENDPOINT"
+# Daca endpoint-ul incepe cu /users, merge la 5001.
 # Detectare serviciu pe baza endpoint-ului
 if [[ $ENDPOINT == /doctors* ]] || [[ $ENDPOINT == /specializations* ]] || [[ $ENDPOINT == /cabinets* ]]; then
     TARGET_URL="$DOCTOR_SERVICE_URL$ENDPOINT"
     SERVICE_NAME="DOCTOR-SERVICE"
-elif [[ $ENDPOINT == /users* ]] || [[ $ENDPOINT == /appointments* ]]; then
+elif [[ $ENDPOINT == /appointments* ]]; then
+    TARGET_URL="$APPOINTMENT_SERVICE_URL$ENDPOINT"
+    SERVICE_NAME="APPOINTMENT-SERVICE"
+elif [[ $ENDPOINT == /users* ]]; then
     TARGET_URL="$USER_SERVICE_URL$ENDPOINT"
     SERVICE_NAME="USER-SERVICE"
 else
-    # Default la user-service
+    # Default
     TARGET_URL="$USER_SERVICE_URL$ENDPOINT"
     SERVICE_NAME="USER-SERVICE"
 fi

@@ -22,10 +22,10 @@ def get_keycloak_public_key():
 
     try:
         # cer cheia pt ca nu o am
-        response = requests.get(f"{keycloak_url}/realms/{realm}", timeout=5) 
-        response.raise_for_status()
+        raspuns = requests.get(f"{keycloak_url}/realms/{realm}", timeout=5) 
+        raspuns.raise_for_status()
 
-        realm_data = response.json()
+        realm_data = raspuns.json()
         public_key_str = realm_data.get('public_key')
 
         if not public_key_str:

@@ -9,12 +9,12 @@ from routes.schedules import schedules_bp
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
-
-    # initializare DB
+    app.json.sort_keys = False 
+    # initializare BD
     db.init_app(app)
 
     # rutele
-    app.register_blueprint(aux_bp)  # specializari, cabinete, fara prefixuri cum e la doctor sau schedule
+    app.register_blueprint(aux_bp)  # specializari, cabinete
     app.register_blueprint(doctors_bp)
     app.register_blueprint(schedules_bp)
     
