@@ -274,7 +274,6 @@ def get_all_doctors():
 
     doctorii = filter_doc.all()
 
-    # adaug doar numele doctorului in output
     results = []
     for doc in doctorii:
         result = {
@@ -354,7 +353,7 @@ def create_doctor():
         # ACTUALIZEZ SI ROLUL IN BD LA DOCTOR
         user.role = UserRole.DOCTOR
 
-        # actualizez si in Keycloak rolul - usrul
+        # actualizez si in Keycloak rolul - userul
         update_keycloak_role(user.id, user.external_id, 'DOCTOR')
 
         db.session.add(new_doc)

@@ -7,12 +7,30 @@ from bd_struc_flask import db, Appointment, AppointmentEvent, EventType, Appoint
 
 app = create_app()
 
+
+def producator_mail_queue(data):
+    """
+    Am nevoie si aici de producatorul pentru emailuri ca sa trimit 
+    emailurile atunci cand pacientul face o programare noua(inregistreaza o programarea -> PENDING)
+    """
+    try:
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=app.config['RABBITMQ_HOST']))
+        channel = connection.channel()
+        channel.queue_declare(queue='notifications_queue', durable=True)
+        
+        channel.basic_publish( exchange='', routing_key='notifications_queue',
+            body=json.dumps(data), properties=pika.BasicProperties(delivery_mode=2))
+        connection.close()
+
+    except Exception as e:
+        print(f"Eroare producator mail: {e}")
+
 def procesare_cerere(ch, method, properties, body):
     """
     Aici procesez mesajele venite de producatorul din appointments.py
     Eu deja verific cererile de programare din producator inainte sa le trimit in coada
     cum ar fi daca programul de lucru exista la doctor, daca ora se afla in program si daca
-    datele sunt trimise bine, ca nu mai verific si aici si sa trimit cereri degeaba
+    datele sunt trimise bine, ca sa nu mai verific si aici si sa trimit cereri degeaba
     Aici mai ramane sa verific daca exista suprapuneri cu alte programari deja existente,
     adica conflict si pe urma salvez in bd daca e ok, daca nu le resping
     """
@@ -87,6 +105,18 @@ def procesare_cerere(ch, method, properties, body):
             db.session.commit()
             print(f"Programare creata cu succes (ID - {cerere_noua.id})")
 
+            # trimit cerere de procesare email catre workerul de notificari
+            notificare = {
+                    'user_id': cerere_noua.patient_id,
+                    'appointment_id': cerere_noua.id,
+                    'patient_name': data.get('patient_name', 'Pacient'),
+                    'patient_email': data.get('patient_email', 'unknown@test.com'),
+                    'status': 'PENDING',
+                    'type': 'EMAIL',
+                    'message': 'Cererea dvs. a fost inregistrata si asteapta sa fie confirmata de catre medic. Odata ce medicul va confirma, veti primi o alta notificare prin email.'
+                }
+            producator_mail_queue(notificare)
+
         except Exception as e:
             print(f"Eroare: la procesarea mesajului {e}")
             db.session.rollback()
@@ -125,5 +155,3 @@ if __name__ == '__main__':
         start_worker()
     except KeyboardInterrupt:
         print("Oprire consumator")
-
-    # start_worker()

@@ -3,18 +3,15 @@ from flask import Flask
 from sqlalchemy.exc import OperationalError
 from config import Config
 from bd_struc_flask import db
-from routes.appointments import appointments_bp
-from routes.events import events_bp
+from routes.notifications import notifications_bp
 
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
     app.json.sort_keys = False
-    app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
-    
+
     db.init_app(app)
-    app.register_blueprint(appointments_bp)
-    app.register_blueprint(events_bp)
+    app.register_blueprint(notifications_bp)
 
     with app.app_context():
         max_retries = 10
@@ -25,11 +22,11 @@ def create_app(config_class=Config):
                 break
 
             except OperationalError:
-                if attempt == max_retries - 1:
+                if attempt == max_retries - 1: 
                     exit(1)
                 print(f"Eroare BD nu e up inca")
                 time.sleep(3)
-
+    
     return app
 
 if __name__ == '__main__':

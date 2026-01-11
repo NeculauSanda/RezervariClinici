@@ -194,7 +194,7 @@ def get_available_slots(doctor_id):
         Appointment.doctor_id == doctor_id,
         Appointment.start_time >= start_of_day,
         Appointment.start_time <= end_of_day,
-        Appointment.status != AppointmentStatus.CANCELLED
+        Appointment.status.notin_([AppointmentStatus.CANCELLED, AppointmentStatus.REJECTED])
     ).all()
 
     intervale_ocupate = []

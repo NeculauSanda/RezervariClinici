@@ -8,6 +8,26 @@ from utils.auth import require_auth, require_role, get_token_from_header, get_us
 appointments_bp = Blueprint('appointments', __name__, url_prefix='/appointments')
 
 # ------------- functii ajutatoare ---------------
+
+def producator_mail_queue(data):
+    """
+    Producatorul pentru emailuri
+    """
+    try:
+        connection = pika.BlockingConnection(
+            pika.ConnectionParameters(host=current_app.config['RABBITMQ_HOST'])
+        )
+        channel = connection.channel()
+        channel.queue_declare(queue='notifications_queue', durable=True)
+        channel.basic_publish(exchange='', routing_key='notifications_queue',
+            body=json.dumps(data), properties=pika.BasicProperties(delivery_mode=2))
+        connection.close()
+        return True
+
+    except Exception as e:
+        print(f"Eroare producator mail: {e}")
+        return False
+
 def producator_mes_queue(message_dict):
     """
     Producatorul de mesaje pentru coada
@@ -29,10 +49,21 @@ def producator_mes_queue(message_dict):
     except Exception as e:
         print(f"Eroare producator {e}")
         return False
-    
+
+def programari_finalizate():
+    """
+    Functie care schimba starea programarilor care s-au finalizat in COMPLETED
+    """
+    now = datetime.utcnow()
+    Appointment.query.filter(
+        Appointment.status == AppointmentStatus.CONFIRMED,
+        Appointment.end_time < now
+    ).update({Appointment.status: AppointmentStatus.COMPLETED})
+    db.session.commit()
+
 def info_output_programare(appointment: Appointment):
     """
-    Afiseaza info programare cum vreau eu 
+    Afiseaza info programare datele cele mai importante
     """
     if not appointment:
         return {}
@@ -90,6 +121,10 @@ def get_appointments():
     in functie de doctor, pacient, ziua/zilele(o perioada de tipm pe care se afiseaza)
     staus
     """
+
+    # marcez inainte programarile care s-au terminat ca sunt COMPLETED
+    programari_finalizate()
+
     status = request.args.get('status')
     doctor_id = request.args.get('doctor_id')
     patient_id = request.args.get('patient_id')
@@ -136,6 +171,10 @@ def get_my_active_appointments():
     """
     Returneaza programarile active ale pacientului curent care se alfa in starea PENDING sau CONFIRMED
     """
+
+    # marcez inainte programarile care s-au terminat ca sunt COMPLETED
+    programari_finalizate()
+
     external_id = request.user.get('external_id')
     user = User.query.filter_by(external_id=external_id).first()
 
@@ -160,6 +199,10 @@ def get_my_history():
     Afisare programari trecute ale utilizatorului curent care sunt instarea COMPLETED/CANCELLED/REJECTED
     filtru dupa status se poate pune
     """
+
+    # marcez inainte programarile care s-au terminat ca sunt COMPLETED
+    programari_finalizate()
+
     external_id = request.user.get('external_id')
     user = User.query.filter_by(external_id=external_id).first()
     if not user: return jsonify({'Eroare': 'User inexistent'}), 404
@@ -201,16 +244,20 @@ def get_appointment_details(id):
     
     if user.role == 'ADMIN':
         return jsonify(info_output_programare(programare)), 200
+    
+    elif user.role == 'PATIENT':
+        if programare.patient_id != user.id:
+            return jsonify({'Eroare': 'Permisiuni insuficiente'}), 403
 
     elif user.role == 'DOCTOR':
         doctor = Doctor.query.filter_by(user_id=user.id).first()
         if not doctor or doctor.id != programare.doctor_id:
-            return jsonify({'Eroare': 'Permisiuni insuficiente'}), 403
+            # daca doctorul nu e nici pacient 
+            # (daca e pacient si are rol de doctor il lasam sa si vada programarea de pacient)
+            if programare.patient_id != user.id:
+                return jsonify({'Eroare': 'Permisiuni insuficiente'}), 403
         return jsonify(info_output_programare(programare)), 200
 
-    elif user.role == 'PATIENT':
-        if programare.patient_id != user.id:
-            return jsonify({'Eroare': 'Permisiuni insuficiente'}), 403
 
     return jsonify(info_output_programare(programare)), 200
 
@@ -220,17 +267,18 @@ def create_appointment_request():
     """
     Cerere programare de catre pacient
     Mai intai verific daca datele sunt bune ca sa nu trimit degeaba mesajul in coada
-    Verificare consta sa verific daca ziua si ora se afla in programl de lucru al doctorului
+    Verificare consta in a verifica daca ziua si ora se afla in programul de lucru al doctorului
     """
     data = request.get_json()
     date_ob = ['doctor_id', 'start_time', 'end_time']
     for i in date_ob:
         if i not in data:
-            return jsonify({'Eroare': 'Date insuficiente, doctor_id, start_time, end_time'}), 400
+            return jsonify({'Eroare': 'Date insuficiente, trebuie: doctor_id, start_time, end_time'}), 400
 
     external_id = request.user.get('external_id')
     user = User.query.filter_by(external_id=external_id).first()
-    if not user: return jsonify({'Eroare': 'User inexistent'}), 404
+    if not user:
+        return jsonify({'Eroare': 'User inexistent'}), 404
 
     try:
         format = '%Y-%m-%d %H:%M:%S'
@@ -250,7 +298,7 @@ def create_appointment_request():
     if not program_doctor:
         return jsonify({
             'Eroare': 'REJECT: Doctorul nu lucreaza in aceasta zi',
-            'detalii': f'Ziua solicitata: {weekday} (0-Luni, 1-Marti,...6-Duminica)'}), 400
+            'detalii': f'Ziua solicitata: {weekday} (0->Luni, 1->Marti,...6->Duminica)'}), 400
 
     # verific daca ora se incadreaza in programul de lucru
     if start_data.time() < program_doctor.start_time or end_data.time() > program_doctor.end_time:
@@ -327,6 +375,24 @@ def cancel_appointment(id):
     
     try:
         db.session.commit()
+
+        # verific daca pacientul e in BD si trimit notificarea de anulare(email) sa fie procesata
+        user = User.query.get(programare.patient_id)
+        if user:
+            notificare_data = {
+                'user_id': programare.patient_id,
+                'appointment_id': programare.id,
+                'patient_name': user.full_name,
+                'patient_email': user.email,
+                'doctor_id': programare.doctor_id,
+                'start_time': programare.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'end_time': programare.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'CANCELLED',
+                'type': 'EMAIL',
+                'message': f"Programarea dumneavoastra a fost anulata de {'dumneavoastra' if pacient else 'catre doctor'}."
+            }
+            producator_mail_queue(notificare_data)
+
         return jsonify(info_output_programare(programare)), 200
     except Exception as e:
         db.session.rollback()
@@ -345,6 +411,14 @@ def confirm_appointment(id):
     if programare.status != AppointmentStatus.PENDING:
         return jsonify({'Eroare': 'Doar programarile PENDING pot fi confirmate'}), 400
 
+    # verific daca doctorul care confirma cererea e cel care are programarea
+    external_id = request.user.get('external_id')
+    user = User.query.filter_by(external_id=external_id).first()
+    if user.role == 'DOCTOR':
+        doctor = Doctor.query.filter_by(user_id=user.id).first()
+        if not doctor or doctor.id != programare.doctor_id:
+            return jsonify({'Eroare': 'Permisiuni insuficiente. Doar doctorul INSUSI poate confirma.'}), 403
+
     programare.status = AppointmentStatus.CONFIRMED
     programare.updated_at = datetime.utcnow()
     
@@ -355,15 +429,38 @@ def confirm_appointment(id):
         payload={'info': 'Programare confirmata de medic'})
     db.session.add(event)
 
-    db.session.commit()
-    return jsonify(info_output_programare(programare)), 200
+    try:
+        db.session.commit()
+
+        # trimit notificarea de confirmare(email) sa fie procesata
+        user = User.query.get(programare.patient_id)
+        if user:
+            notificare_data = {
+                'user_id': programare.patient_id,
+                'appointment_id': programare.id,
+                'patient_name': user.full_name,
+                'patient_email': user.email,
+                'doctor_id': programare.doctor_id,
+                'cabinet_id': programare.cabinet_id,
+                'start_time': programare.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'end_time': programare.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'CONFIRMED',
+                'type': 'EMAIL',
+                'message': f"Programarea dumneavoastra a fost CONFIRMATA de catre medic."
+            }
+            producator_mail_queue(notificare_data)
+
+        return jsonify(info_output_programare(programare)), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'Eroare': str(e)}), 500
 
 @appointments_bp.route('/<int:id>', methods=['PUT'])
 @require_role('ADMIN', 'DOCTOR')
 def update_appointment(id):
     """
     Actualizare info programare de catre ADMIN sau DOCTOR doar daca e in PENDING
-    Se poate schimba ora, cabinetul, data si actualizez la evenimente ca a fost actualizata
+    Se poate schimba ora, cabinetul, data si pe urma actualizez la evenimente ca a fost actualizata
     programarea (UPDATED)
     """
 
@@ -373,40 +470,86 @@ def update_appointment(id):
     if programare.status != AppointmentStatus.PENDING:
         return jsonify({'Eroare': 'Doar programarile PENDING pot fi modificate'}), 400
 
+    old_start = programare.start_time
+    old_end = programare.end_time
+
     data = request.get_json()
     format = '%Y-%m-%d %H:%M:%S'
     str_rez = ''
+    info_schimbate = []
     # schimbare date
     if 'start_time' in data:
-            programare.start_time = datetime.strptime(data['start_time'], format)
-            str_rez += "start_time"
+        programare.start_time = datetime.strptime(data['start_time'], format)
+        str_rez += "start_time"
+        info_schimbate.append('start_time')
+        info_schimbate.append(str(programare.start_time.isoformat().replace('T', ' ')))
 
     if 'end_time' in data:
-            programare.end_time = datetime.strptime(data['end_time'], format)
-            str_rez += " end_time"
+        programare.end_time = datetime.strptime(data['end_time'], format)
+        str_rez += " end_time"
+        info_schimbate.append('end_time')
+        info_schimbate.append(str(programare.end_time.isoformat().replace('T', ' ')))
 
     if 'cabinet_id' in data:
         programare.cabinet_id = data['cabinet_id']
         str_rez += " cabinet_id"
+        info_schimbate.append('cabinet_id')
+        info_schimbate.append(str(programare.cabinet_id))
+
+        
+    # verific daca exista conflict cu NOUL SLOT
+    if 'start_time' in data or 'end_time' in data:
+        conflict = Appointment.query.filter(
+            Appointment.doctor_id == programare.doctor_id,
+            Appointment.id != int(id), # exclud programarea curenta
+            Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+            Appointment.start_time < programare.end_time,
+            Appointment.end_time > programare.start_time
+        ).first()
+
+        if conflict:
+            return jsonify({'Eroare': 'Noul slot e ocupat! Alege alta ora.'}), 400
 
     # actualizez data la care s-a facut actualizarea programarii
     programare.updated_at = datetime.utcnow()
     programare.notes = f"Programare actualizata de medic: s-a schimbat {str_rez.strip()}"
 
-    # eveniment UPDATED
+    # eveniment de UPDATED pentru a vedea adminul toate schimbarile produse (pt audit)
     event = AppointmentEvent(appointment_id=programare.id,
         event_type=EventType.UPDATED,
         payload={
+            'old_start': old_start.isoformat().replace('T', ' '),
+            'old_end': old_end.isoformat().replace('T', ' '),
             'new_start': programare.start_time.isoformat().replace('T', ' '),
             'new_end': programare.end_time.isoformat().replace('T', ' '),
             'new_cabinet_id': programare.cabinet_id,
             'info': 'Programare modificata de medic'
         })
-
     db.session.add(event)
 
     try:
         db.session.commit()
+
+        # trimit notificarea de update(email) ca sa fie procesata
+        user = User.query.get(programare.patient_id)
+        if user:
+
+            schimbari_str = ", ".join(info_schimbate) if info_schimbate else "detalii"
+
+            notificare_data = {
+                'user_id': programare.patient_id,
+                'appointment_id': programare.id,
+                'patient_name': user.full_name,
+                'patient_email': user.email,
+                'doctor_id': programare.doctor_id,
+                'start_time': programare.start_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'end_time': programare.end_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'status': 'UPDATED',
+                'type': 'EMAIL',
+                'message': f'Programarea a fost modificata. Actualizari: {schimbari_str}.'
+            }
+            producator_mail_queue(notificare_data)
+
         return jsonify(info_output_programare(programare)), 200
     except Exception as e:
         db.session.rollback()

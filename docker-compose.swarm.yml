@@ -43,15 +43,15 @@ services:
         constraints:
           - node.role == manager
 
-  # rabbitmq:
-  #   image: rabbitmq:3-management
-  #   ports:
-  #     - "15672:15672"
-  #     - "5672:5672"
-  #   networks:
-  #     - internal-net
-  #   deploy:
-  #     replicas: 1
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "15672:15672"
+      - "5672:5672"
+    networks:
+      - internal-net
+    deploy:
+      replicas: 1
 
   user-service:
     image: medical-user-service:latest
@@ -60,6 +60,8 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: medical-clinica
       KEYCLOAK_CLIENT_ID: medical-app
+      KEYCLOAK_BACKEND_CLIENT_ID: ${KEYCLOAK_BACKEND_CLIENT_ID:-medical-backend}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-secret-backend}
     networks:
       - internal-net
       - db-net
@@ -67,11 +69,7 @@ services:
     ports:
       - "5001:5000"
     deploy:
-      replicas: 2
-      restart_policy:
-        condition: on-failure
-        delay: 10s
-        max_attempts: 10
+      replicas: 1
 
   doctor-service:
     image: medical-doctor-service:latest
@@ -80,6 +78,8 @@ services:
       KEYCLOAK_URL: http://keycloak:8080
       KEYCLOAK_REALM: medical-clinica
       KEYCLOAK_CLIENT_ID: medical-app
+      KEYCLOAK_BACKEND_CLIENT_ID: ${KEYCLOAK_BACKEND_CLIENT_ID:-medical-backend}
+      KEYCLOAK_BACKEND_CLIENT_SECRET: ${KEYCLOAK_BACKEND_CLIENT_SECRET:-secret-backend}
     networks:
       - internal-net
       - db-net
@@ -92,38 +92,139 @@ services:
         constraints:
           - node.role == manager
 
-  # appointment-service:
-  #   image: medical-appointment-service:latest
-  #   environment:
-  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
-  #     KEYCLOAK_URL: http://keycloak:8080
-  #     KEYCLOAK_REALM: medical-clinica
-  #     RABBITMQ_HOST: rabbitmq
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #     - auth-net
-  #   ports:
-  #     - "5003:5000"
-  #   deploy:
-  #     replicas: 2
-  #     restart_policy:
-  #       condition: on-failure
+  appointment-service:
+    image: medical-appointment-service:latest
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      RABBITMQ_HOST: rabbitmq
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - db
+      - keycloak
+      - rabbitmq
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    ports:
+      - "5003:5000"
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 10
 
-  # appointment-worker:
-  #   image: medical-appointment-service:latest
-  #   command: python worker.py
-  #   environment:
-  #     DATABASE_URL: postgresql://scd:scd@db:5432/clinica
-  #     RABBITMQ_HOST: rabbitmq
-  #   networks:
-  #     - internal-net
-  #     - db-net
-  #   deploy:
-  #     replicas: 1 # Un singur worker pentru a evita race conditions la scriere
-  #     restart_policy:
-  #       condition: on-failure
+  appointment-worker:
+    image: medical-appointment-service:latest
+    command: python worker.py
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      RABBITMQ_HOST: rabbitmq
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - internal-net
+      - db-net
+    deploy:
+      replicas: 1 # 1 singur worker pentru a evita race conditions la scriere
+      placement:
+        constraints:
+          - node.role == manager # rulat doar pe manager pt a evita si aici concurenta
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
 
+  mailhog:
+    image: mailhog/mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - internal-net
+    deploy:
+      replicas: 1
+
+  minio:
+    image: minio/minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    networks:
+      - internal-net
+    deploy:
+      replicas: 1
+
+  createbuckets:
+    image: minio/mc
+    networks:
+      - internal-net
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin; do echo 'astept MinIO sa porneasca'; sleep 1; done;
+      /usr/bin/mc mb --ignore-existing myminio/confirmations;
+      /usr/bin/mc anonymous set download myminio/confirmations;
+      echo 'Bucket configurat cu succes!';
+      exit 0;
+      "
+    deploy:
+      restart_policy:
+        condition: on-failure
+
+  notification-service:
+    image: medical-notification-service:latest
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@clinica.com
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: confirmations
+      PYTHONUNBUFFERED: 1
+    ports:
+      - "5004:5000"
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    deploy:
+      replicas: 1
+
+  notification-worker:
+    image: medical-notification-service:latest
+    command: python worker.py
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      RABBITMQ_HOST: rabbitmq
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      SMTP_FROM: noreply@clinica.com 
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: minioadmin 
+      MINIO_SECRET_KEY: minioadmin 
+      MINIO_BUCKET: confirmations 
+      PYTHONUNBUFFERED: 1
+    networks:
+      - internal-net
+      - db-net
+    deploy:
+      replicas: 1
+  
 networks:
   db-net:
     driver: overlay
@@ -134,3 +235,4 @@ networks:
 
 volumes:
   db_data:
+  minio_data: 

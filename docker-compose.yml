@@ -131,6 +131,7 @@ services:
     volumes:
       - ./appointment-service:/app
 
+  # consumatorul pentru programari
   appointment-worker:
     build: ./appointment-service
     container_name: appointment_worker
@@ -148,6 +149,103 @@ services:
       - ./appointment-service:/app
     command: python worker.py
 
+  # Server de mail pt simulare
+  mailhog:
+    image: mailhog/mailhog
+    container_name: mailhog
+    ports:
+      - "1025:1025" # SMTP
+      - "8025:8025" # cosola web vad in timp real
+    networks:
+      - internal-net
+
+  notification-service:
+    build: ./notification-service
+    container_name: notification_service
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - db
+      - keycloak
+      - mailhog
+    ports:
+      - "5004:5000"
+    networks:
+      - internal-net
+      - db-net
+      - auth-net
+    volumes:
+      - ./notification-service:/app
+    command: gunicorn --bind 0.0.0.0:5000 --workers 2 'app:create_app()'
+
+  # consumatorul pentru mailuri
+  notification-worker:
+    build: ./notification-service
+    container_name: notification_worker
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      SMTP_HOST: mailhog
+      SMTP_PORT: 1025
+      PYTHONUNBUFFERED: 1
+    depends_on:
+      - db
+      - rabbitmq
+      - mailhog
+    networks:
+      - internal-net
+      - db-net 
+    volumes:
+      - ./notification-service:/app
+    command: python worker.py
+
+  # MinIO
+  minio:
+    image: minio/minio
+    container_name: minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001" # consola web
+    networks:
+      - internal-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # proces pentru crearea automata a bucket-ului pentru minio
+  createbuckets:
+    image: minio/mc
+    depends_on:
+      - minio
+    networks:
+      - internal-net
+    entrypoint: >
+      /bin/sh -c "
+      until /usr/bin/mc config host add myminio http://minio:9000 minioadmin minioadmin; do
+        echo 'astept MinIO sa porneasca'
+        sleep 1
+      done;
+
+      /usr/bin/mc mb --ignore-existing myminio/confirmations;
+      /usr/bin/mc anonymous set download myminio/confirmations;
+      
+      echo 'Bucket configurat cu succes!';
+      exit 0;
+      "
 networks:
   db-net:
     driver: bridge
@@ -158,3 +256,4 @@ networks:
 
 volumes:
   db_data:
+  minio_data:

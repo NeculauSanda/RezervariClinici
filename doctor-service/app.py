@@ -27,6 +27,7 @@ def create_app(config_class=Config):
                 db.engine.connect()
                 print("doctor-service: Conexiune reusita la BD")
                 break
+
             except OperationalError:
                 if attempt == max_retries - 1:
                     print("doctor-service: Eroare fatala la conexiunea cu BD")

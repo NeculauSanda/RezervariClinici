@@ -9,6 +9,7 @@ CLIENT_ID="medical-app"
 USER_SERVICE_URL="http://localhost:5001"
 DOCTOR_SERVICE_URL="http://localhost:5002" 
 APPOINTMENT_SERVICE_URL="http://localhost:5003"
+NOTIFICATION_SERVICE_URL="http://localhost:5004"
 
 # Culori pentru output
 GREEN='\033[0;32m'
@@ -25,51 +26,8 @@ DATA=$4
 
 if [ -z "$ROLE" ] || [ -z "$METHOD" ] || [ -z "$ENDPOINT" ]; then
     echo -e "Utilizare: ${GREEN}./test.sh <ROL> <METODA> <ENDPOINT> [JSON_DATA]${NC}"
-    # echo ""
-    # echo -e "${BLUE}ROLURI DISPONIBILE:${NC}"
-    # echo "  - admin     (Admin clinica)"
-    # echo "  - doctor    (Doctor)"
-    # echo "  - patient   (Pacient)"
-    # echo ""
-    # echo -e "${BLUE}USER-SERVICE ENDPOINTS:${NC}"
-    # echo "  GET    /users/health"
-    # echo "  POST   /users/register              (fara auth)"
-    # echo "  GET    /users/me"
-    # echo "  PUT    /users/me"
-    # echo "  GET    /users/                      (ADMIN ONLY)"
-    # echo "  GET    /users/<id>                  (ADMIN ONLY)"
-    # echo "  PUT    /users/<id>                  (ADMIN ONLY)"
-    # echo "  DELETE /users/<id>                  (ADMIN ONLY)"
-    # echo ""
-    # echo -e "${BLUE}DOCTOR-SERVICE ENDPOINTS:${NC}"
-    # echo "  GET    /specializations"
-    # echo "  GET    /cabinets"
-    # echo "  GET    /doctors"
-    # echo "  POST   /doctors                     (ADMIN ONLY)"
-    # echo "  GET    /doctors/<id>"
-    # echo "  PUT    /doctors/<id>                (ADMIN ONLY)"
-    # echo "  DELETE /doctors/<id>                (ADMIN ONLY)"
-    # echo "  GET    /doctors/<id>/schedule"
-    # echo "  POST   /doctors/<id>/schedule       (ADMIN/DOCTOR)"
-    # echo "  DELETE /doctors/<id>/schedule/<id>  (ADMIN/DOCTOR)"
-    # echo "  GET    /doctors/<id>/available-slots?date=YYYY-MM-DD"
-    # echo ""
-    # echo -e "${BLUE}EXEMPLE:${NC}"
-    # echo "  ./test.sh admin GET /users"
-    # echo "  ./test.sh doctor GET /doctors"
-    # echo "  ./test.sh patient GET /doctors/1/available-slots?date=2025-12-10"
-    # echo "  ./test.sh admin POST /doctors '{\"user_id\": 2, \"specialization_id\": 1, \"cabinet_id\": 1}'"
-    # echo ""
     exit 1
 fi
-
-# if [ -z "$ROLE" ] || [ -z "$METHOD" ] || [ -z "$ENDPOINT" ]; then
-#     echo "Utilizare: ./test.sh <ROL> <METODA> <ENDPOINT> [JSON_DATA]"
-#     echo "Exemplu:   ./test.sh admin GET /users"
-#     echo "Exemplu:   ./test.sh patient POST /users/sync-keycloak"
-#     echo "Roluri disponibile: admin, doctor, patient"
-#     exit 1
-# fi
 
 # 2 --> pentru usurinta am setat deja useri pe care i am predefinit in realm la export
 # Deci doar alegem userul si parola in functie de rolul dat ca argument si am mai adaugat
@@ -125,6 +83,12 @@ if [[ $ENDPOINT == /doctors* ]] || [[ $ENDPOINT == /specializations* ]] || [[ $E
 elif [[ $ENDPOINT == /appointments* ]]; then
     TARGET_URL="$APPOINTMENT_SERVICE_URL$ENDPOINT"
     SERVICE_NAME="APPOINTMENT-SERVICE"
+elif [[ $ENDPOINT == /events* ]]; then
+    TARGET_URL="$APPOINTMENT_SERVICE_URL$ENDPOINT"
+    SERVICE_NAME="APPOINTMENT-SERVICE"
+elif [[ $ENDPOINT == /notifications* ]]; then  
+    TARGET_URL="$NOTIFICATION_SERVICE_URL$ENDPOINT"
+    SERVICE_NAME="NOTIFICATION-SERVICE"
 elif [[ $ENDPOINT == /users* ]]; then
     TARGET_URL="$USER_SERVICE_URL$ENDPOINT"
     SERVICE_NAME="USER-SERVICE"

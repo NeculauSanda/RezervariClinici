@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import subprocess
+import threading
 import requests
 import time
 from typing import Dict, List, Tuple, Optional
@@ -16,6 +17,8 @@ class TestApp:
         self.keycloak_url = "http://localhost:8080"
         self.user_service_url = "http://localhost:5001"
         self.doctor_service_url = "http://localhost:5002"
+        self.appointment_service_url = "http://localhost:5003"
+        self.notification_service_url = "http://localhost:5004"
         self.realm = "medical-clinica"
         self.client_id = "medical-app"
 
@@ -25,6 +28,7 @@ class TestApp:
             'doctor': ('doctor1', 'doctor123'),
             'patient': ('patient1', 'patient123'),
             'patient_nou': ('pacient_nou@test.com', 'parola_noua_123'),
+            'patient_nou2': ('pacient_nou2@test.com', '12345678'),
         }
        
 
@@ -87,13 +91,15 @@ class TestApp:
             ("docker swarm init && sleep 2", "Initializare docker-swarm"),
             ("docker build -t medical-user-service:latest ./user-service && sleep 10", "construire User-Service"),
             ("docker build -t medical-doctor-service:latest ./doctor-service && sleep 5", "construire Doctor-Service"),
+            ("docker build -t medical-appointment-service:latest ./appointment-service && sleep 5", "construire Appointment-Service"),
+            ("docker build -t medical-notification-service:latest ./notification-service && sleep 5", "construire Notification-Service"),
         ]
 
         for cmd, descriere in comenzi:
             print(f"Se ruleaza: {descriere}")
 
             if descriere.startswith("construire User-Service"):
-                print("!!! Dureaza cam 40-45 secunde build-ul prima data !!!")
+                print("!!! Dureaza cam 40-45 secunde build-ul la primul serviciu data, iar la celelalte undeva la 30-40s total !!!")
 
             returncode, stdout, stderr = self.run_Shell(cmd)
 
@@ -109,16 +115,15 @@ class TestApp:
         """
 
         self.print_Sectiuni("Rulare Aplicatie cu Docker Swarm")
-
         # comanda
-        returncode, stdout, stderr = self.run_Shell( "docker stack deploy -c docker-compose.swarm.yml medical_app && sleep 5" )
+        returncode, stdout, stderr = self.run_Shell( "docker stack deploy -c docker-compose.swarm.yml medical_app && sleep 10" )
 
         if returncode == 0:
             self.print_TesteRez("OK", "S-a pornit Docker Stack")
 
-            # Trebuie asteptat putin ca sa se active toate serviciile si ca BD ul sa fie si el up
-            print("\nSe pregatesc serviciile, dureaza cam 30 sec, pana cand sunt toate up + BD ul\n")
-            time.sleep(30)
+            # Trebuie asteptat putin ca sa se activeze toate serviciile si ca BD ul sa fie si el up
+            print("\nSe pregatesc serviciile, dureaza cam 50 sec, pana cand sunt toate up + BD ul\n")
+            time.sleep(55)
 
             # Afisare servicii
             returncode, stdout, stderr = self.run_Shell("docker service ls")
@@ -186,7 +191,6 @@ class TestApp:
             )
 
             if raspuns.status_code == 200:
-                # data = raspuns.json()
                 self.tokens[rol] = raspuns.json()['access_token']
                 self.print_TesteRez("OK", f"S-a obtinut TOKEN pentru userul {rol} ({username})\n")
                 return True
@@ -211,6 +215,12 @@ class TestApp:
 
         if endpoint.startswith('/users'):
             url = f"{self.user_service_url}{endpoint}"
+
+        if endpoint.startswith('/appointments') or endpoint.startswith('/events'):
+            url = f"{self.appointment_service_url}{endpoint}"
+
+        if endpoint.startswith('/notifications'):
+            url = f"{self.notification_service_url}{endpoint}"
 
         # tokenul
         headers = {
@@ -246,7 +256,7 @@ class TestApp:
 
         self.print_Sectiuni("Sincronizare utilizatori(de test) din realm si in BD local")
 
-        for role in ['admin', 'doctor', 'patient']:
+        for role in ['admin', 'doctor', 'patient', 'patient_nou']:
             status, raspuns = self.request(role, 'POST', '/users/sync-keycloak')
 
             print(f"{colors['BOLD']}Sincronizare userului {role} in BD-ul local{colors['RESET']}")
@@ -267,10 +277,10 @@ class TestApp:
         print(f"{colors['BOLD']}       INREGISTRARE UNUI NOU UTILIZATOR {colors['RESET']}\n")
 
         date_user_nou = {
-            "email": "pacient_nou@test.com",
-            "password": "parola_noua_123",
-            "full_name": "Pacient Nou Test",
-            "phone": "0700111222",
+            "email": "pacient_nou2@test.com",
+            "password": "12345678",
+            "full_name": "Pacient Nou Test 2",
+            "phone": "0700111223",
             "role": "PATIENT"
         }
 
@@ -290,7 +300,7 @@ class TestApp:
             self.print_TesteRez("EROARE TEST", "Inregistrare utilizator nou nu a reusit", str(e)[:100])
 
         # Obtin token-ul pentru userul nou inregistrat
-        self.Get_Token('patient_nou')
+        self.Get_Token('patient_nou2')
 
         # ------------------ AFIARE UTILIZATORI DOAR DE CATRE ADMIN ------------------
 
@@ -328,7 +338,7 @@ class TestApp:
         # GRESIT
         print(f"\n{colors['BOLD']}->VARIANTA GRESITA\n{colors['RESET']}")
         status, raspuns = self.request('patient', 'GET', f'/users/2')
-        # aici v-a fi pe invers rezultatul pt ca e un test pt logica la admin
+        # aici v-a fi pe invers rezultatul pt ca e test pt logica la admin
         if status != 200:
             self.print_TesteRez("CORECT TEST", f"(patient) GET /users/2 \nStatus: {status}", f"Rezultat: {raspuns}\n")
         else:
@@ -337,7 +347,7 @@ class TestApp:
         # -------------------- AFISARE PROFIL PROPRIU NU POATE ACCESA PROFIL ALTUIA --------------------
 
         print(f"\n{colors['BOLD']}       AFISARE PROFILUL PROPRIU AL UTILIZATORULUI ACTUAL {colors['RESET']}\n")
-        for role in ['doctor', 'patient_nou']:
+        for role in ['doctor', 'patient_nou2']:
             status, raspuns = self.request(role, 'GET', '/users/me')
 
             if status == 200:
@@ -348,17 +358,17 @@ class TestApp:
         # -------------------- ACTUALIZARE DATE UTILIZATORULUI DE CATRE EL -------------------- 
 
         print(f"\n{colors['BOLD']}       ACTUALIZARE PROFIL PROPRIU {colors['RESET']}\n")
-        print("-> Datele neactualizate a userului (patient_nou) sunt afisate la comanda anterioara de mai sus\n" \
+        print("-> Datele neactualizate a userului (patient_nou2) sunt afisate la comanda anterioara de mai sus\n" \
         "!!! Toate actualizarile de date la useri sau eliminarea lor se fac si in keycloak !!!\n")
         date_input = {
             "full_name": "Popescu Ionut",
             "phone": "0700123456"
         }
-        status, raspuns = self.request('patient_nou', 'PUT', '/users/me', date_input)
+        status, raspuns = self.request('patient_nou2', 'PUT', '/users/me', date_input)
         if status == 200:
-            self.print_TesteRez("CORECT TEST", f"(patient_nou) PUT /users/me {{date}}\nStatus: {status}", f"Raspuns: {raspuns}\n")
+            self.print_TesteRez("CORECT TEST", f"(patient_nou2) PUT /users/me {{date}}\nStatus: {status}", f"Raspuns: {raspuns}\n")
         else:
-            self.print_TesteRez("EROARE TEST", f"(patient_nou) PUT /users/me {{date}}\nStatus: {status}", f"Raspuns: {raspuns}\n")
+            self.print_TesteRez("EROARE TEST", f"(patient_nou2) PUT /users/me {{date}}\nStatus: {status}", f"Raspuns: {raspuns}\n")
     
         # -------------------- ACTUALIZARE MAI MULTE DATE UTILIZATOR DE CATRE ADMIN --------------------
 
@@ -369,7 +379,7 @@ class TestApp:
             "phone": "0710987654",
             "email": "doctor2@clinica.com"
         }
-        status, raspuns = self.request('admin', 'PUT', '/users/3', date_input_admin)
+        status, raspuns = self.request('admin', 'PUT', '/users/3', date_input_admin) 
         if status == 200:
             self.print_TesteRez("CORECT TEST", f"(admin) PUT /users/3 {{date}}\nStatus: {status}", f"Raspuns: {raspuns}\n")
         else:
@@ -391,20 +401,20 @@ class TestApp:
         # -------------------- STERGERE UTILIZATOR DE CATRE ADMIN --------------------
 
         print(f"\n{colors['BOLD']}       STERGERE UTILIZATOR DE CATRE ADMIN {colors['RESET']}\n")
-        print("-> Adminul sterge utilizatorul nou creat = id 4\n")
-        status, raspuns = self.request('admin', 'DELETE', '/users/4')
+        print("-> Adminul sterge utilizatorul nou creat = id 5\n")
+        status, raspuns = self.request('admin', 'DELETE', '/users/5')
         if status == 200:
-            self.print_TesteRez("CORECT TEST", f"(admin) DELETE /users/4 \nStatus: {status}", f"Raspuns: {raspuns}\n")
+            self.print_TesteRez("CORECT TEST", f"(admin) DELETE /users/5 \nStatus: {status}", f"Raspuns: {raspuns}\n")
         else:
-            self.print_TesteRez("EROARE TEST", f"(admin) DELETE /users/4 \nStatus: {status}", f"Raspuns: {raspuns}\n")
+            self.print_TesteRez("EROARE TEST", f"(admin) DELETE /users/5 \nStatus: {status}", f"Raspuns: {raspuns}\n")
 
         # ------------------- mai inregistrez din nou userul ca am nevoie la testele urmatoare -------------------
         print(f"{colors['BOLD']}       INREGISTREZ DIN NOU UTILIZATORUL STERS PENTRU TESTELE VIITOARE {colors['RESET']}\n")
         date_user_nou = {
-            "email": "pacient_nou@test.com",
-            "password": "parola_noua_123",
-            "full_name": "Pacient Nou Test",
-            "phone": "0700111222",
+            "email": "pacient_nou2@test.com",
+            "password": "12345678",
+            "full_name": "Pacient Nou Test 2",
+            "phone": "0700111223",
             "role": "PATIENT"
         }
 
@@ -418,7 +428,7 @@ class TestApp:
         except Exception as e:
             print(f"Inregistrare utilizator nou nu a reusit: {str(e)[:100]}\n")
 
-        self.Get_Token('patient_nou')
+        self.Get_Token('patient_nou2')
 
     def test_Specializari(self):
         """
@@ -683,31 +693,453 @@ class TestApp:
         else:
             self.print_TesteRez("EROARE TEST", f"(admin) DELETE /doctors/1\n Status: {status}", f"Raspuns: {raspuns}\n")
 
-    def inchidere_DockerApp(self):
+        # --------------------------- ADAUGARE DATE PENTRU TESTAREA URMATOARELOR SERVICII ---------------------------
+        print(f"\n{colors['BOLD']}       ADAUGARE DATE PENTRU TESTAREA URMATOARELOR SERVICII {colors['RESET']}\n")
+        print(f"\n{colors['BOLD']}->Adaugare profil doctor din nou {colors['RESET']}\n")
+
+        # -> profil doctor
+        date_input = { 
+            "user_id": 2, 
+            "specialization_id": 1, 
+            "cabinet_id": 1, 
+            "bio": "Doctor specialist", 
+            "years_experience": 10 
+        }
+        status, raspuns = self.request('admin', 'POST', '/doctors', date_input)
+        if status == 201 or status == 200:
+            self.print_TesteRez("CORECT TEST", f"(admin) POST /doctors '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) POST /doctors '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # ->adaugare 2 programe de lucru
+        print(f"\n{colors['BOLD']}->Adaugare programe de lucru {colors['RESET']}\n")
+        date_input = {
+            "weekday": 0,
+            "start_time": "09:00:00",
+            "end_time": "17:00:00",
+            "slot_duration_minutes": 30
+        }
+        status, raspuns = self.request('doctor', 'POST', '/doctors/2/schedule', date_input)
+        if status == 201 or status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        date_input = {
+            "weekday": 1,
+            "start_time": "10:00:00",
+            "end_time": "16:00:00",
+            "slot_duration_minutes": 30
+        }
+        status, raspuns = self.request('doctor', 'POST', '/doctors/2/schedule', date_input)
+        if status == 201 or status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # -> afisare programe de lucru
+        print(f"\n{colors['BOLD']}->Afisare programe de lucru {colors['RESET']}\n")
+        status, raspuns = self.request('patient_nou', 'GET', '/doctors/2/schedule')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) GET /doctors/2/schedule\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) GET /doctors/2/schedule\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+
+    def test_Appointment_Service(self):
         """
-        Oprire aplicatie docker
+        Pasul 7: Testare APPOINTMENT SERVICE
         """
-        self.print_T("OPRIREA APLICATIEI DOCKER")
-        comenzi = [
-            ("docker stack rm medical_app && sleep 10", "Oprire stack Docker"),
-            ("docker swarm leave --force", "Iesire din swarm Docker"),
-            ("docker volume rm medical_app_db_data", "Curatarea volumelor ale aplicatiei"),
-            ("docker rmi medical-doctor-service:latest medical-user-service:latest", "Curatarea imaginilor ale aplicatiei"),
-        ]
+        self.print_Sectiuni("Testare Appointment-Service")
 
-        for cmd, description in comenzi:
-            print(f"Se ruleaza: {description}")
+        print(f"{colors['BOLD']}La inceput nu exista nicio programare realizata{colors['RESET']}\n")
 
-            if description.startswith("Oprire stack Docker"):
-                print("Dureaza 10 secunde pentru oprirea completa a serviciilor")
+        # --------------------------- AFISARE TOATE PROGRAMARILE DOAR DE CATRE ADMIN SAU DOCTOR ------------------------
 
-            returncode, stdout, stderr = self.run_Shell(cmd)
+        print(f"\n{colors['BOLD']}       AFISARE TOATE PROGRAMARILE DOAR DE CATRE ADMIN SAU DOCTOR  {colors['RESET']}\n")
+        print(f"{colors['BOLD']}Se pot adauga si filtre precum \n?status=PENDING/CONFIRM/CANCELLED/REJECTED&doctor_id=...&date_from=...&date_to=...&patient_id=...{colors['RESET']}\n")
 
-            if returncode == 0:
-                self.print_TesteRez("OK", f"Gata: {description}\n")
-            else:
-                self.print_TesteRez("EROARE", f"Gata: {description}", f"Eroare: {stderr[:100]}\n")
+        status, raspuns = self.request('doctor', 'GET', '/appointments')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) GET /appointments\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) GET /appointments\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # -------------------------- CERERE PROGRAMARE SLOT DE CATRE PACIENT (GRESITA DATA) ------------------------
 
+        print(f"\n{colors['BOLD']}       CERERE PROGRAMARE SLOT GRESIT DATA IN CARE NU LUCREAZA MEDICUL {colors['RESET']}\n")
+        data_input = {
+            "doctor_id": 2,
+            "start_time": "2025-12-17 10:00:00",
+            "end_time": "2025-12-17 10:30:00"
+        }
+        status, raspuns = self.request('patient', 'POST', '/appointments', data_input)
+        if status != 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ------------------------ CERERE PROGRAMARE SLOT DE CATRE PACIENT (GRESITA ORA) ------------------------
+
+        print(f"\n{colors['BOLD']}       CERERE PROGRAMARE SLOT - GRESIT ORA INAFARA PROGRAMULUI  {colors['RESET']}\n")
+        data_input = {
+            "doctor_id": 2,
+            "start_time": "2025-12-15 19:00:00",
+            "end_time": "2025-12-15 19:30:00"
+        }
+        status, raspuns = self.request('patient', 'POST', '/appointments', data_input)
+        if status != 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ------------------------ CERERE PROGRAMARE SLOT DE CATRE PACIENT CONCOMITENT DE CATRE 3 USERI (CORECT) -----------------------
+
+        print(f"\n{colors['BOLD']}      CERERE PROGRAMARE SLOT PE ACELASI INTERVAL DE CATRE 3 PACIENTI DEODATA  {colors['RESET']}\n")
+        print(f"\n{colors['BOLD']} -> ATUNCI CAND SE FACE O CERERE DE PROGRAMARE PRIMUL CARE PRIMESTE ACCEPT-UL PE ACEL SLOT PRIMESTE SI MAIL AUTOMAT CA S-A PROCESAT CEREREA<-{colors['RESET']}\n")
+
+        data_input_1 = {
+            "doctor_id": 2,
+            "start_time": "2025-12-15 10:00:00",
+            "end_time": "2025-12-15 10:30:00"
+        }
+        data_input_2 = {
+            "doctor_id": 2,
+            "start_time": "2025-12-15 10:00:00",
+            "end_time": "2025-12-15 10:30:00"
+        }
+        data_input_3 = {
+            "doctor_id": 2,
+            "start_time": "2025-12-15 10:00:00",
+            "end_time": "2025-12-15 10:30:00"
+        }
+
+        rezultat = {
+            'patient': None,
+            'patient_nou': None,
+            'patient_nou2': None
+        }
+        
+        # lock pentru a proteja accesul la dictionarul de rezultate (evita race conditions)
+        rezultat_lock = threading.Lock()
+
+        def thread_request(role, data_input, rol_key):
+            """
+            Functie care ruleaza un thread separat pentru cereri concurente
+            """
+            status, raspuns = self.request(role, 'POST', '/appointments', data_input)
+            
+            # salvez rezultatul
+            with rezultat_lock:
+                rezultat[rol_key] = {
+                    'status': status,
+                    'raspuns': raspuns,
+                    'rol': role
+                }
+            
+            print(f"[THREAD {rol_key}] Terminat! Status: {status}")
+
+        thread1 = threading.Thread(target=thread_request, args=('patient', data_input_1, 'patient'))
+        thread2 = threading.Thread(target=thread_request, args=('patient_nou', data_input_2, 'patient_nou'))
+        thread3 = threading.Thread(target=thread_request, args=('patient_nou2', data_input_3, 'patient_nou2'))
+
+        # toate thread-urile pornesc simultan
+        thread1.start()
+        thread2.start()
+        thread3.start()
+
+        # astept ca toate sa se termine
+        thread1.join()
+        thread2.join()
+        thread3.join()
+
+        status = rezultat['patient']['status']
+        status2 = rezultat['patient_nou']['status']
+        status3 = rezultat['patient_nou2']['status']
+
+        raspuns = rezultat['patient']['raspuns']
+        raspuns2 = rezultat['patient_nou']['raspuns']
+        raspuns3 = rezultat['patient_nou2']['raspuns']
+        
+        if status == 202 and status2 == 202 and status3 == 202:
+            self.print_TesteRez("CORECT TEST", f"(patient/patient_nou/patient_nou2) POST /appointments '{{date}}'\n Status: {status}, {status2}, {status3}", f"Raspuns: {raspuns},\n {raspuns2},\n {raspuns3}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient/patient_nou/patient_nou2) POST /appointments '{{date}}'\n Status: {status} {status2} {status3}", f"Raspuns: {raspuns}\n {raspuns2}\n {raspuns3}\n")
+        
+
+        time.sleep(5)  # astept putin sa se proceseze cererile
+
+        # --------------------- AFISARE SLOT-URI DISPONIBILE LA DOCTORUL CERUT IN FUNCTIE DE ZI DUPA REZERVARILE EFECTUATE ------------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE SLOT-URI DISPONIBILE DUPA REZERVARE PROGRAMARI {colors['RESET']}\n")
+
+        status, raspuns = self.request('patient_nou', 'GET', '/doctors/2/available-slots?date=2025-12-15')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) GET /doctors/2/available-slots?date=2025-12-15\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) GET /doctors/2/available-slots?date=2025-12-15\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # --------------------------- AFISARE TOATE PROGRAMARILE FACUTE DUPA CERERI ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE DIN NOU TOATE PROGRAMARILE FACUTE DUPA CERERI  {colors['RESET']}\n")
+
+        status, raspuns = self.request('doctor', 'GET', '/appointments')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) GET /appointments\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) GET /appointments\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ------------------------- AFISARE PROGRAMARILE ACTIVE ALE PACIENTULUI ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARILE ACTIVE ALE PACIENTULUI(CELE CARE SE AFLA IN PENDING/CONFIRMED)  {colors['RESET']}\n")
+        print(f"{colors['BOLD']}!! Doar utilizatorul respectiv isi poate acesa propriile programari !!{colors['RESET']}\n")
+        print(f"{colors['BOLD']}!! In cazul asta nu o sa aiba nicio programare activa este pentru ca nu e primul care a primit confirmarea pe slot-ul respectiv\nNu stiu care a facut primul rezervare deoarece folosesc thread-uri !!{colors['RESET']}\n")
+        
+        pacient_pendig = None # ma ajuta sa stiu care pacient a primit confirmarea ca a reusit sa faca programarea, pentru testele urmatoare
+        status, raspuns = self.request('patient', 'GET', '/appointments/my')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        if raspuns != []:
+            pacient_pendig = 'patient'
+
+        status, raspuns = self.request('patient_nou', 'GET', '/appointments/my')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        if raspuns != []:
+            pacient_pendig = 'patient_nou'
+
+        status, raspuns = self.request('patient_nou2', 'GET', '/appointments/my')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou2) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou2) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        if raspuns != []:
+            pacient_pendig = 'patient_nou2'
+        # ------------------------- AFISARE PROGRAMARILE DIN ISTORIC ALE PACIENTULUI ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARILE DIN ISTORIC ALE PACIENTULUI(CELE CARE SE AFLA IN CANCELLED/REJECTED)  {colors['RESET']}\n")
+        print(f"{colors['BOLD']}!! Doar utilizatorul respectiv isi poate acesa propriile programari !!{colors['RESET']}\n")
+
+        status, raspuns = self.request('patient', 'GET', '/appointments/my/history')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+
+        status, raspuns = self.request('patient_nou', 'GET', '/appointments/my/history')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+
+        status, raspuns = self.request('patient_nou2', 'GET', '/appointments/my/history')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou2) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou2) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # --------------------------- AFISARE PROGRAMARE DUPA ID ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARE DUPA ID  {colors['RESET']}\n")
+        print(f"{colors['BOLD']}!! Utilizatorul poate sa si le vada doar pe ale sale, doctorul doar cele la care este asignat, iar adminul pe toate \
+               In cazul in care pacientul are si rol de medic se poate afisa si programarea sa!!{colors['RESET']}\n")
+
+        status, raspuns = self.request(pacient_pendig, 'GET', '/appointments/1')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"({pacient_pendig}) GET /appointments/1\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"({pacient_pendig}) GET /appointments/1\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # -------------------------- ACTUALIZARE DATE PROGRAMARE(DOAR CELE IN PENDING SE POT ACTUALIZA) --------------------
+
+        print(f"\n{colors['BOLD']}       ACTUALIZARE DATE PROGRAMARE(DOAR CELE CARE SE AFLA IN PENDING SE POT ACTUALIZA)\n        SI DE CATRE ADMIN/DOCTORUL CARE ARE PROGRAMAREA RESPECTIVA  {colors['RESET']}")
+        print(f"{colors['BOLD']}!!Se poate actualiza ora,data si cabinetul. Odata ce s-a schimbat ora intervalul vechi e eliberat si se poate ocupa pe urma!!{colors['RESET']}\n")
+        print(f"\n{colors['BOLD']} ->ATUNCI CAND SE ACTUALIZEAZA O CERERE DE PROGRAMARE SE TRIMITE MAIL AUTOMAT CA S-A ACTUALIZAT PROGRAMAREA SI DATELE NOI<-{colors['RESET']}\n")
+
+        data_input = {
+            "start_time": "2025-12-15 11:00:00",
+            "end_time": "2025-12-15 11:30:00"
+        }
+        status, raspuns = self.request('doctor', 'PUT', '/appointments/1', data_input)
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) PUT /appointments/1 '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) PUT /appointments/1 '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # --------------------------- AFISARE SLOT-URI DISPONIBILE LA DOCTORUL CERUT IN FUNCTIE DE ZI DUPA ACTUALIZAREA PROGRAMARII --------------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE SLOT-URI DISPONIBILE DUPA CE S-A ACTUALIZAT ORA LA O PROGRAMARE {colors['RESET']}\n")
+
+        status, raspuns = self.request('patient_nou', 'GET', '/doctors/2/available-slots?date=2025-12-15')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) GET /doctors/2/available-slots?date=2025-12-15\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) GET /doctors/2/available-slots?date=2025-12-15\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # ----------------------------- CONFIRMARE PROGRAMARE DE CATRE DOCTOR/ADMIN SI DOAR CELE IN PENDING --------------------
+
+        print(f"\n{colors['BOLD']}       CONFIRMARE PROGRAMARE DE CATRE DOCTOR/ADMIN SI DOAR CELE AFLATE IN PENDING  {colors['RESET']}")
+        print(f"\n{colors['BOLD']} -> ATUNCI CAND SE CONFIRMA O CERERE DE PROGRAMARE SE TRIMITE MAIL AUTOMAT CA MEDICUL A CONFIRMAT PROGRAMAREA SI SE TRIMITE SI PDF CU DATELE IMPORTANTE(locatie, nume, nume doctor, specializare, ora, etc) <-{colors['RESET']}\n")
+
+        status, raspuns = self.request('doctor', 'PUT', '/appointments/1/confirm')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) PUT /appointments/1/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) PUT /appointments/1/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # -------------------------- ANULARE PROGRAMARE DE CATRE DOCTOR/PACIENT-INSUSI SI DOAR CELE IN CONFIRM/PENDING --------------------
+
+        print(f"\n{colors['BOLD']}       ANULARE PROGRAMARE DE CATRE DOCTOR/PACIENT-INSUSI SI DOAR CELE AFLATE IN CONFIRM/PENDING  {colors['RESET']}")
+        print(f"\n{colors['BOLD']} -> ATUNCI CAND SE ANULEAZA O CERERE DE PROGRAMARE SE TRIMITE MAIL AUTOMAT CA MEDICUL/PACIENTUL AU ANULAT PROGRAMAREA <-{colors['RESET']}\n")
+
+        status, raspuns = self.request('doctor', 'PUT', '/appointments/1/cancel')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) PUT /appointments/1/cancel\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) PUT /appointments/1/cancel\n Status: {status}", f"Raspuns: {raspuns}\n")
+    
+    def test_Notifications_Service(self):
+        """
+        Pasul 8: Testare NOTIFICATIONS SERVICE
+        """
+        self.print_Sectiuni("Testare Notification-Service")
+
+        # ----------------------- AFISARE TOATE NOTIFICARILE(TRIMISE PRIN EMAIL) DUPA USER ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE TOATE NOTIFICARILE(EMAIL) TRIMISE DUPA UN USER DAT(ADMIN)  {colors['RESET']}\n")
+      
+        status, raspuns = self.request('admin', 'GET', '/notifications/user/3')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(admin) GET /notifications/user/3\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) GET /notifications/user/3\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ----------------------- AFISARE TOATE NOTIFICARILE(TRIMISE PRIN EMAIL) DUPA PROGRAMARE ---------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE TOATE NOTIFICARILE(EMAIL) TRIMISE DUPA ID PROGRAMARE(ADMIN)  {colors['RESET']}\n")
+      
+        status, raspuns = self.request('admin', 'GET', '/notifications/appointment/1')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(admin) GET /notifications/appointment/1\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) GET /notifications/appointment/1\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ---------------------- TRIMITERE MANUALA NOTIFICARE (EMAIL) DE CATRE ADMIN --------------------
+
+        print(f"\n{colors['BOLD']}       TRIMITERE MANUALA NOTIFICARI(MAIL)(ADMIN)  {colors['RESET']}\n")
+      
+        data_input = {
+            "user_id": 3,
+            "message": "Test, notificare trimisa manual",
+            "type": "EMAIL",
+            "appointment_id": 1
+        }
+        status, raspuns = self.request('admin', 'POST', '/notifications/send', data_input)
+        if status == 201:
+            self.print_TesteRez("CORECT TEST", f"(admin) POST /notifications/send\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) POST /notifications/send\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+    def test_events(self):
+        """
+        Pasul 9: Testare EVENTS (pentru audit)
+        """
+        self.print_Sectiuni("Testare Events")
+
+        # ----------------------- AFISARE TOATE EVENIMENTELE CREATE ADMIN -----------------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE TOATE EVENIMENTELE CREATE(ADMIN)  {colors['RESET']}\n")
+        print("-> Apar toate etapele facute de la o programare, daca ceva nu merge bine, adminul poate vedea istoricul comenzilor\n")
+      
+        status, raspuns = self.request('admin', 'GET', '/events/pending')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(admin) GET /events/pending\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) GET /events/pending\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # ----------------------- CONFIRMARE UN EVENIMENT DUPA ID ADMIN ---------------------------------
+
+        print(f"\n{colors['BOLD']}       CONFIRMARE UN EVENIMENT DUPA ID DACA A MERS BINE(ADMIN)  {colors['RESET']}\n")
+
+        status, raspuns = self.request('admin', 'PUT', '/events/1/processed')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(admin) PUT /events/1/processed\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(admin) PUT /events/1/processed\n Status: {status}", f"Raspuns: {raspuns}\n")
+   
+    def test_finalizare_programari(self):
+        """
+        Pasul 10: Finalizare programari (setare ca finalizate cele trecute)
+        """
+        self.print_Sectiuni("Finalizare programari")
+
+        # -------------------- AFISARE PROGRAMARI ACTIVE ALE PACIENTULUI CURENT ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARI ACTIVE ALE PACIENTULUI CURENT  {colors['RESET']}\n")
+        print("-> Vedem daca mai apare progrmare activa dupa ce s-a terminat timpul ei\n")
+        print("-> Prima programare a fost anulata de catre doctor, deci nu o sa apara aici\n")
+
+        status, raspuns = self.request('patient', 'GET', '/appointments/my')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # ---------------------- AFISARE PROGRAMARI ARHIVATE ALE PACIENTULUI CURENT ----------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARI ARHIVATE ALE PACIENTULUI CURENT  {colors['RESET']}\n")
+        status, raspuns = self.request('patient', 'GET', '/appointments/my/history')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+
+        # ---------------------- ADAUGARE ALTEI PROGRAMARI PENTRU A TESTA FINALIZAREA ----------------------
+
+        print("-> Mai adaug inca o programre la pacientul asta pentru a testa finalizarea programri pentru ca cealalta a fost anulata\n")
+
+        data_input = {
+            "doctor_id": 2,
+            "start_time": "2025-12-15 13:00:00",
+            "end_time": "2025-12-15 13:30:00"
+        }
+        status, raspuns = self.request('patient', 'POST', '/appointments', data_input)
+        if status != 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        time.sleep(5)  # astept putin sa se proceseze cererile
+
+        # ---------------------- CONFIRMARE PROGRAMARE NOUA DE CATRE DOCTOR/ADMIN ------------------
+
+        print("-> Confirm programarea noua\n")
+        status, raspuns = self.request('doctor', 'PUT', '/appointments/4/confirm')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) PUT /appointments/4/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) PUT /appointments/4/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        # ---------------------- AFISARE PROGRAMARI ARHIVATE ALE PACIENTULUI CURENT DUPA ADAUGARE NOUA PROGRAMARE -------------------
+
+        print(f"\n{colors['BOLD']}       AFISARE PROGRAMARI ARHIVATE ALE PACIENTULUI CURENT  {colors['RESET']}\n")
+        print("-> In cazul asta data programarii a trecut deci se arhiveaza\n")
+
+        status, raspuns = self.request('patient', 'GET', '/appointments/my/history')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
+   
 
     def rezultate(self):
         """
@@ -744,11 +1176,14 @@ class TestApp:
             self.test_Specializari()
             self.test_Cabinete()
             self.test_Doctor_Service()
+            self.test_Appointment_Service()
+            self.test_Notifications_Service()
+            self.test_events()
+            self.test_finalizare_programari()
         except Exception as e:
             print(f"\n{colors['RED']}Eroare: {str(e)}{colors['RESET']}")
         finally:
             self.rezultate()
-            self.inchidere_DockerApp()
 
 
 def main():
