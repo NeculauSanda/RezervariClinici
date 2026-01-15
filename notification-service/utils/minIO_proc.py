@@ -32,6 +32,7 @@ def upload_file_to_minio(file_data, filename, content_type='application/pdf'):
             }
         ]
     }
+
     client.set_bucket_policy(bucket, json.dumps(politica))
 
     # convertim bytes in stream

@@ -140,6 +140,29 @@ services:
         delay: 5s
         max_attempts: 10
 
+  appointment-reminder:
+    image: medical-appointment-service:latest
+    command: python reminder.py
+    environment:
+      DATABASE_URL: postgresql://scd:scd@db:5432/clinica
+      RABBITMQ_HOST: rabbitmq
+      PYTHONUNBUFFERED: 1
+    depends_on:
+    - db
+    - rabbitmq
+    networks:
+      - internal-net
+      - db-net
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+
   mailhog:
     image: mailhog/mailhog
     ports:

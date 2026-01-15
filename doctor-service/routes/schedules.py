@@ -7,6 +7,7 @@ from utils.auth import require_auth, require_role, get_user_info_from_token, get
 schedules_bp = Blueprint('schedules', __name__, url_prefix='/doctors')
 
 @schedules_bp.route('/<int:doctor_id>/schedule', methods=['GET'])
+@require_auth
 def get_schedule(doctor_id):
     """
     Returneza programul de lucru al doctorului cerut in ordinea zilelor saptamanii
@@ -155,6 +156,7 @@ def delete_schedule_slot(doctor_id, schedule_id):
 
 
 @schedules_bp.route('/<int:doctor_id>/available-slots', methods=['GET'])
+@require_auth
 def get_available_slots(doctor_id):
     """
     Calculez sloturile libere pentru o data specifica, cand are doctorul program

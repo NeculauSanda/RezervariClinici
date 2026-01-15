@@ -149,6 +149,23 @@ services:
       - ./appointment-service:/app
     command: python worker.py
 
+  # serviciul pentru notificaarea de reminder ruleaza in fiecare minut
+  appointment-reminder:
+    build: ./appointment-service
+    container_name: appointment_reminder
+    command: python reminder.py
+    environment:
+      DATABASE_URL: postgresql://${DB_USER:-scd}:${DB_PASSWORD:-scd}@db:5432/${DB_NAME:-clinica}
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medical-clinica
+      RABBITMQ_HOST: rabbitmq
+    depends_on:
+      - db
+      - rabbitmq
+    networks:
+      - internal-net
+      - db-net
+
   # Server de mail pt simulare
   mailhog:
     image: mailhog/mailhog

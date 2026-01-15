@@ -84,6 +84,7 @@ def update_keycloak_role(user_id, external_id, new_role):
 # ----------------- COMENZI SEPARATE PENTRU SPECIALIZARI SI CABINETE -----------------
 # ----------------- COMENZI PENTRU SPECIALIZARI -----------------
 @aux_bp.route('/specializations', methods=['GET'])
+@require_auth
 def get_specializations():
     """
     Afiseaza toate specializarile din clinica
@@ -169,6 +170,7 @@ def delete_specialization(id):
 # ----------------- COMENZI PENTRU CABINETE -----------------
 
 @aux_bp.route('/cabinets', methods=['GET'])
+@require_auth
 def get_cabinets():
     """
     Afiseaza toate cabinetele din clinica
@@ -257,6 +259,7 @@ def delete_cabinet(id):
 # ----------------- COMENZI PENTRU DOCTORI -----------------
 
 @doctors_bp.route('', methods=['GET'])
+@require_auth
 def get_all_doctors():
     """
     Returneaza lista doctorilor,
@@ -293,6 +296,7 @@ def get_all_doctors():
     return jsonify(results), 200
 
 @doctors_bp.route('/<int:id>', methods=['GET'])
+@require_auth
 def get_doctor(id):
     """
     Returneaza detaliile unui doctor dupa id

@@ -16,7 +16,7 @@ def send_manual_notification():
     
     for i in ('user_id', 'message', 'type'):
         if i not in data:
-            return jsonify({'Eroare': f'Date incomplete trebuie (user_id, message, type(EMAIL/SMS), appointment_id(optional))'}), 400
+            return jsonify({'Eroare': f'Date incomplete trebuie (user_id, message, type(EMAIL), appointment_id(optional))'}), 400
 
     # verific daca userul exista in BD
     user = User.query.get(data['user_id'])
@@ -37,7 +37,7 @@ def send_manual_notification():
     pdf_bytes = None
     pdf_name = None
 
-    # se incearca trimiterea emailului
+    # trimit emailului
     trimis = False
     if notificare.type == NotificationType.EMAIL:
         trimis = send_email_smtp(user.email, "Notificare Clinica", notificare.message, attachment_data=pdf_bytes, attachment_name=pdf_name)

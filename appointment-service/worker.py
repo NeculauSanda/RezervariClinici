@@ -34,7 +34,7 @@ def procesare_cerere(ch, method, properties, body):
     Aici mai ramane sa verific daca exista suprapuneri cu alte programari deja existente,
     adica conflict si pe urma salvez in bd daca e ok, daca nu le resping
     """
-    # accesez bd prin flask
+    # accesez bd
     with app.app_context():
         data = json.loads(body)
 
@@ -69,6 +69,18 @@ def procesare_cerere(ch, method, properties, body):
                 )
                 db.session.add(cerere_respinsa)
                 db.session.commit()
+
+                #se trimit notificare de refuz catre pacient
+                notificare = {
+                    'user_id': cerere_respinsa.patient_id,
+                    'appointment_id': cerere_respinsa.id,
+                    'patient_name': data.get('patient_name', 'Pacient'),
+                    'patient_email': data.get('patient_email', 'unknown@test.com'),
+                    'status': 'REJECTED',
+                    'type': 'EMAIL',
+                    'message': 'Cererea dvs. a fost refuzata, slotul este deja ocupat'
+                }
+                producator_mail_queue(notificare)
 
                 # a procesat mesajul si il sterge din coada, altfel vor fi relivrate aletoriu din nou
                 ch.basic_ack(delivery_tag=method.delivery_tag)

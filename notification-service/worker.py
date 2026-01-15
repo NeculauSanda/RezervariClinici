@@ -2,6 +2,7 @@ import pika
 import json
 import time
 import os
+import secrets
 from datetime import datetime
 from app import create_app
 from utils.email_handler import send_email_smtp
@@ -38,7 +39,9 @@ def procesare_cerere(ch, method, properties, body):
             try:
                 print("Generare PDF")
                 pdf_bytes = generate_confirmation_pdf(data)
-                pdf_name = f"programare_{data.get('appointment_id')}.pdf"
+                # generez un nume unic pt pdf ca sa nu fie usor de ghicit(pt ca la mine bucketul e public)
+                token = secrets.token_urlsafe(16)
+                pdf_name = f"programare_{data.get('appointment_id')}_{token}.pdf"
                 
                 print("Upload MinIO")
                 url_minio = upload_file_to_minio(pdf_bytes, pdf_name)

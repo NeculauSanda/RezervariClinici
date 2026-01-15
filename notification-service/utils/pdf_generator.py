@@ -33,7 +33,8 @@ def generate_confirmation_pdf(data):
     pdf.set_text_color(0, 102, 204)  # albastru
     pdf.cell(200, 10, txt=f"Data si ora la care incepe programarea: {data.get('start_time', 'N/A')}", ln=1)
     pdf.cell(200, 10, txt=f"Data si ora la care se termina programarea: {data.get('end_time', 'N/A')}", ln=1)
-    pdf.set_text_color(0, 0, 0)  # negru
+    pdf.set_text_color(0, 0, 0)
+
     # status
     pdf.set_font("Arial", 'B', 12)
     pdf.cell(200, 10, txt=f"Status: {data.get('status', 'CONFIRMAT')}", ln=1)

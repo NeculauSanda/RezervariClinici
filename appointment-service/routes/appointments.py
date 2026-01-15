@@ -28,9 +28,9 @@ def producator_mail_queue(data):
         print(f"Eroare producator mail: {e}")
         return False
 
-def producator_mes_queue(message_dict):
+def producator_app_queue(message_dict):
     """
-    Producatorul de mesaje pentru coada
+    Producatorul de programari pentru coada
     """
     try:
         connection = pika.BlockingConnection(
@@ -293,18 +293,30 @@ def create_appointment_request():
     doctor_id = data['doctor_id']
     weekday = start_data.weekday()
 
-    program_doctor = Schedule.query.filter_by(doctor_id=doctor_id, weekday=weekday).first()
-
+    program_doctor = Schedule.query.filter_by(doctor_id=doctor_id, weekday=weekday).all()
+    
     if not program_doctor:
         return jsonify({
             'Eroare': 'REJECT: Doctorul nu lucreaza in aceasta zi',
             'detalii': f'Ziua solicitata: {weekday} (0->Luni, 1->Marti,...6->Duminica)'}), 400
+    
+    slot_valid = False
+    for prog in program_doctor:
+        if start_data.time() >= prog.start_time and end_data.time() <= prog.end_time:
+            slot_valid = True
+            break
+    
+    timp_lucru_lista = []
+    for prog in program_doctor:
+        timp_lucru_lista.append(f"{prog.start_time} - {prog.end_time}")
+
+    timp_lucru = " / ".join(timp_lucru_lista)
 
     # verific daca ora se incadreaza in programul de lucru
-    if start_data.time() < program_doctor.start_time or end_data.time() > program_doctor.end_time:
+    if not slot_valid:
         return jsonify({
             'Eroare': 'REJECT: Ora solicitata este in afara programului de lucru.',
-            'program_doctor': f"{program_doctor.start_time} - {program_doctor.end_time}"}), 400
+            'program_doctor': f"{timp_lucru}"}), 400
 
     # daca nu a fost mentionat cabinetul il luam de la doctor
     doctor = None
@@ -326,7 +338,7 @@ def create_appointment_request():
         'cabinet_id': cabinet_id
     }
 
-    if producator_mes_queue(message):
+    if producator_app_queue(message):
         return jsonify({'message': 'Cererea a fost validata si trimisa spre procesare', 'status': 'QUEUED'}), 202
     else:
         return jsonify({'Eroare': 'Coada de mesaje indisponibila'}), 500

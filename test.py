@@ -3,7 +3,7 @@ import subprocess
 import threading
 import requests
 import time
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, Tuple
 
 colors = {'GREEN': '\033[92m', 'RED': '\033[91m', 'YELLOW': '\033[93m',
             'BLUE': '\033[94m', 'BLUE_GREEN': '\033[96m', 'RESET': '\033[0m', 'BOLD': '\033[1m'}
@@ -89,7 +89,7 @@ class TestApp:
 
         comenzi = [
             ("docker swarm init && sleep 2", "Initializare docker-swarm"),
-            ("docker build -t medical-user-service:latest ./user-service && sleep 10", "construire User-Service"),
+            ("docker build -t medical-user-service:latest ./user-service && sleep 5", "construire User-Service"),
             ("docker build -t medical-doctor-service:latest ./doctor-service && sleep 5", "construire Doctor-Service"),
             ("docker build -t medical-appointment-service:latest ./appointment-service && sleep 5", "construire Appointment-Service"),
             ("docker build -t medical-notification-service:latest ./notification-service && sleep 5", "construire Notification-Service"),
@@ -123,7 +123,7 @@ class TestApp:
 
             # Trebuie asteptat putin ca sa se activeze toate serviciile si ca BD ul sa fie si el up
             print("\nSe pregatesc serviciile, dureaza cam 50 sec, pana cand sunt toate up + BD ul\n")
-            time.sleep(55)
+            time.sleep(40)
 
             # Afisare servicii
             returncode, stdout, stderr = self.run_Shell("docker service ls")
@@ -171,8 +171,8 @@ class TestApp:
 
     def Get_Token(self, rol: str):
         """
-        Functie care i-a tokenul de la userii abia inregistrati care nu se afla in realm la inceput
-        cum e patient_nou din userii pe care l-am pus mai sus
+        Functie care i-a tokenul de la userii abia inregistrati, care nu se afla in realm la inceput
+        cum e patient_nou2 din userii pe care i-am pus mai sus
         """
 
         username, password = self.users[rol]
@@ -338,6 +338,7 @@ class TestApp:
         # GRESIT
         print(f"\n{colors['BOLD']}->VARIANTA GRESITA\n{colors['RESET']}")
         status, raspuns = self.request('patient', 'GET', f'/users/2')
+
         # aici v-a fi pe invers rezultatul pt ca e test pt logica la admin
         if status != 200:
             self.print_TesteRez("CORECT TEST", f"(patient) GET /users/2 \nStatus: {status}", f"Rezultat: {raspuns}\n")
@@ -867,7 +868,7 @@ class TestApp:
             self.print_TesteRez("EROARE TEST", f"(patient/patient_nou/patient_nou2) POST /appointments '{{date}}'\n Status: {status} {status2} {status3}", f"Raspuns: {raspuns}\n {raspuns2}\n {raspuns3}\n")
         
 
-        time.sleep(5)  # astept putin sa se proceseze cererile
+        time.sleep(2)  # astept putin sa se proceseze cererile
 
         # --------------------- AFISARE SLOT-URI DISPONIBILE LA DOCTORUL CERUT IN FUNCTIE DE ZI DUPA REZERVARILE EFECTUATE ------------------------
 
@@ -1118,7 +1119,7 @@ class TestApp:
         else:
             self.print_TesteRez("EROARE TEST", f"(patient) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
         
-        time.sleep(5)  # astept putin sa se proceseze cererile
+        time.sleep(2)  # astept putin sa se proceseze cererile
 
         # ---------------------- CONFIRMARE PROGRAMARE NOUA DE CATRE DOCTOR/ADMIN ------------------
 
@@ -1140,6 +1141,59 @@ class TestApp:
         else:
             self.print_TesteRez("EROARE TEST", f"(patient) GET /appointments/my/history\n Status: {status}", f"Raspuns: {raspuns}\n")
    
+    def test_reminder_email(self):
+        """
+        testul asta ar trebuie modificat manual ca sa trimite mail la programarile care incep intr-o ora pana la cele
+        care incep in 30 de min (am lasat mai mult timp doar pentru testare). La program se alege ziua in care se face testarea si orele, 
+        apoi se aduga programarea in asa fel incat sa se incadreze in intervalul de timp pentru trimiterea mail-ului se poate pune si inainte
+        cu mai mult de o ora pentru a vedea ca trimite cand trebuie
+        """
+
+        # sterg programul de lucru de luni la doctor ca sa pot sa l adaug din nou, dar din 10 - 10 min pt testare
+        print(f"\n{colors['BOLD']}       STERG PROGRAM DE LUCRU DE LUNI + ADAUG UNU NOU DIN 10-10 MINUTE  {colors['RESET']}\n")
+       
+        status, raspuns = self.request('doctor', 'DELETE', '/doctors/2/schedule/2')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) DELETE /doctors/2/schedule/2\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) DELETE /doctors/2/schedule/2\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        date_input = {
+            "weekday": 0,
+            "start_time": "12:00:00",
+            "end_time": "19:00:00",
+            "slot_duration_minutes": 5
+        }
+
+        status, raspuns = self.request('doctor', 'POST', '/doctors/2/schedule', date_input)
+        if status == 201 or status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) POST /doctors/2/schedule '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        print(f"\n{colors['BOLD']}       FAC PROGRAMARE LA DOCTOR   {colors['RESET']}\n")
+
+        data_input = {
+            "doctor_id": 2,
+            "start_time": "2026-01-19 17:40:00",
+            "end_time": "2026-01-19 17:45:00"
+        }
+
+        status, raspuns = self.request('patient_nou', 'POST', '/appointments', data_input)
+        if status != 200:
+            self.print_TesteRez("CORECT TEST", f"(patient_nou) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(patient_nou) POST /appointments '{{date}}'\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
+        time.sleep(0.5)
+        print(f"\n{colors['BOLD']}       CONFIRMARE DE LA DOCTOR SI SE ASTEAPTA MAILUL DE REMINDER  {colors['RESET']}\n")
+
+        status, raspuns = self.request('doctor', 'PUT', '/appointments/5/confirm')
+        if status == 200:
+            self.print_TesteRez("CORECT TEST", f"(doctor) PUT /appointments/5/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        else:
+            self.print_TesteRez("EROARE TEST", f"(doctor) PUT /appointments/5/confirm\n Status: {status}", f"Raspuns: {raspuns}\n")
+        
 
     def rezultate(self):
         """
@@ -1180,6 +1234,7 @@ class TestApp:
             self.test_Notifications_Service()
             self.test_events()
             self.test_finalizare_programari()
+            self.test_reminder_email()
         except Exception as e:
             print(f"\n{colors['RED']}Eroare: {str(e)}{colors['RESET']}")
         finally:
