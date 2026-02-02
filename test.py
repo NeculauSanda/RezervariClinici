@@ -1175,8 +1175,8 @@ class TestApp:
 
         data_input = {
             "doctor_id": 2,
-            "start_time": "2026-01-19 17:40:00",
-            "end_time": "2026-01-19 17:45:00"
+            "start_time": "2026-01-19 18:10:00",
+            "end_time": "2026-01-19 18:15:00"
         }
 
         status, raspuns = self.request('patient_nou', 'POST', '/appointments', data_input)

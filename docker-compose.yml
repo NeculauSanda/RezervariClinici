@@ -149,7 +149,7 @@ services:
       - ./appointment-service:/app
     command: python worker.py
 
-  # serviciul pentru notificaarea de reminder ruleaza in fiecare minut
+  # serviciul pentru notificaarea de reminder
   appointment-reminder:
     build: ./appointment-service
     container_name: appointment_reminder
